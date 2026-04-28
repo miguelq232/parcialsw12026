@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+target/
+.angular/
+
+# Logs
+*.log
+*.err.log
+
+# Local databases and runtime files
+*.mv.db
+*.trace.db
+
+# Downloaded local tools
+tools/
+
+# Environment files
+.env
+.env.*
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
