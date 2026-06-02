@@ -1,12 +1,6 @@
 version: '3.8'
 
 services:
-  mongodb:
-    image: mongo:latest
-    volumes:
-      - mongo_data:/data/db
-    restart: always
-
   ai-service:
     build: ./ai-service
     expose:
@@ -25,11 +19,10 @@ services:
     expose:
       - "8080"
     environment:
-      - MONGODB_URI=${MONGODB_URI:-mongodb://mongodb:27017/swp1}
+      - MONGODB_URI=${MONGODB_URI:?MONGODB_URI is required}
       - GROQ_API_KEY=${GROQ_API_KEY}
       - AI_PREDICTION_URL=http://ai-service:8001/predict
     depends_on:
-      - mongodb
       - ai-service
     restart: always
 
@@ -42,6 +35,5 @@ services:
     restart: always
 
 volumes:
-  mongo_data:
   ai_models:
   ai_data:
