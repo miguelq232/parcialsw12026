@@ -1618,7 +1618,7 @@ export class MonitorComponent implements OnInit, OnDestroy {
   getFileUrl(path: string): string {
     if (!path) return '';
     if (path.startsWith('http')) return path;
-    return `http://${window.location.hostname}:8080${path}`;
+    return path;
   }
 
   hasPendingUploads(): boolean {

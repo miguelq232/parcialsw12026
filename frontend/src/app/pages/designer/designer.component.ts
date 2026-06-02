@@ -1637,7 +1637,7 @@ export class DesignerComponent implements AfterViewChecked, OnInit, OnDestroy {
 
   connectWebSocket(): void {
     this.stompClient = new Client({
-      webSocketFactory: () => new SockJS(`http://${window.location.hostname}:8080/ws-designer`),
+      webSocketFactory: () => new SockJS('/ws-designer'),
       debug: (str) => console.log(str),
       reconnectDelay: 5000
     });
