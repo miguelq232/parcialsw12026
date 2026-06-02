@@ -1,5 +1,4 @@
-MONGO_ROOT_USER=root
-MONGO_ROOT_PASSWORD=change_this_password
+MONGODB_URI=mongodb://usuario:password@host:27017/swp1?authSource=admin
 GROQ_API_KEY=
 TRAIN_MODEL_ON_START=false
 TRAINING_ROWS=5000
