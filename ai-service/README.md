@@ -23,7 +23,15 @@ Primero genera datos de entrenamiento demo:
 
 ```powershell
 cd D:\swp1-main
-.\ai-service\.venv\Scripts\python ai-service\scripts\generate_demo_data.py --rows 800
+.\ai-service\.venv\Scripts\python ai-service\scripts\generate_demo_data.py --rows 5000
+```
+
+El generador crea casos balanceados de riesgo bajo, medio y alto, con escenarios como
+tramites sin asignado, alta carga, documentos pendientes, retrabajo, estancamiento y
+tramites finalizados. Para generar mas datos:
+
+```powershell
+.\ai-service\.venv\Scripts\python ai-service\scripts\generate_demo_data.py --rows 20000
 ```
 
 Luego entrena con un entorno que tenga TensorFlow instalado:
@@ -52,3 +60,22 @@ http://localhost:8001/predict
 ```
 
 Puedes cambiarlo con la variable `AI_PREDICTION_URL`.
+
+## Produccion con Docker Compose
+
+En Docker Compose el backend debe apuntar al nombre interno del servicio:
+
+```text
+AI_PREDICTION_URL=http://ai-service:8001/predict
+```
+
+El servicio puede arrancar sin un modelo entrenado y usara la formula base. Si quieres
+que el contenedor genere datos y entrene el modelo automaticamente cuando no exista:
+
+```text
+TRAIN_MODEL_ON_START=true
+TRAINING_ROWS=5000
+TRAINING_EPOCHS=80
+```
+
+El modelo queda persistido en el volumen Docker montado en `/app/models`.

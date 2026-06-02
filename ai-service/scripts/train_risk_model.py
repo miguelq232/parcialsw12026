@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 from pathlib import Path
 from statistics import mean, pstdev
 
@@ -50,6 +51,7 @@ def main() -> None:
     parser.add_argument("--data", default="ai-service/data/demo_risk_cases.jsonl")
     parser.add_argument("--model-dir", default="ai-service/models")
     parser.add_argument("--epochs", type=int, default=180)
+    parser.add_argument("--seed", type=int, default=20260531)
     args = parser.parse_args()
 
     try:
@@ -65,6 +67,13 @@ def main() -> None:
     cases = load_cases(data_path)
     if len(cases) < 50:
         raise SystemExit("Necesitas al menos 50 casos para entrenar.")
+
+    random.Random(args.seed).shuffle(cases)
+    distribution = {"BAJO": 0, "MEDIO": 0, "ALTO": 0}
+    for case in cases:
+        level = case.get("label", {}).get("riskLevel")
+        if level in distribution:
+            distribution[level] += 1
 
     x_raw = [
         [feature_value(case.get("features", {}), name) for name in FEATURE_NAMES]
@@ -82,6 +91,8 @@ def main() -> None:
 
     model = tf.keras.Sequential([
         tf.keras.layers.Input(shape=(len(FEATURE_NAMES),)),
+        tf.keras.layers.Dense(48, activation="relu"),
+        tf.keras.layers.Dropout(0.08),
         tf.keras.layers.Dense(24, activation="relu"),
         tf.keras.layers.Dense(12, activation="relu"),
         tf.keras.layers.Dense(1, activation="sigmoid"),
@@ -101,6 +112,14 @@ def main() -> None:
         epochs=args.epochs,
         batch_size=32,
         validation_split=0.2,
+        shuffle=True,
+        callbacks=[
+            tf.keras.callbacks.EarlyStopping(
+                monitor="val_loss",
+                patience=18,
+                restore_best_weights=True,
+            )
+        ],
         verbose=0,
     )
 
@@ -115,7 +134,9 @@ def main() -> None:
         "means": means,
         "stds": stds,
         "rows": len(cases),
+        "riskDistribution": distribution,
         "epochs": args.epochs,
+        "trainedEpochs": len(history.history["loss"]),
         "finalLoss": float(history.history["loss"][-1]),
         "finalValLoss": float(history.history["val_loss"][-1]),
         "finalMae": float(history.history["mae"][-1]),
@@ -125,6 +146,7 @@ def main() -> None:
 
     print(f"Saved model: {model_path}")
     print(f"Saved metadata: {metadata_path}")
+    print("Distribucion de riesgo:", distribution)
     print(
         "MAE aproximado:",
         round(metadata["finalValMae"] * 100, 2),

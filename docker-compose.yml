@@ -3,28 +3,41 @@ version: '3.8'
 services:
   mongodb:
     image: mongo:latest
-    container_name: swp1-mongodb
-    ports:
-      - "27017:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_ROOT_USER}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_ROOT_PASSWORD}
     volumes:
       - mongo_data:/data/db
     restart: always
 
+  ai-service:
+    build: ./ai-service
+    ports:
+      - "8001:8001"
+    environment:
+      - TRAIN_MODEL_ON_START=${TRAIN_MODEL_ON_START:-false}
+      - TRAINING_ROWS=${TRAINING_ROWS:-5000}
+      - TRAINING_EPOCHS=${TRAINING_EPOCHS:-80}
+    volumes:
+      - ai_models:/app/models
+      - ai_data:/app/data
+    restart: always
+
   backend:
     build: ./backend
-    container_name: swp1-backend
     ports:
       - "8080:8080"
     environment:
-      - SPRING_DATA_MONGODB_URI=mongodb://mongodb:27017/swp1
+      - MONGODB_URI=mongodb://${MONGO_ROOT_USER}:${MONGO_ROOT_PASSWORD}@mongodb:27017/swp1?authSource=admin
       - GROQ_API_KEY=${GROQ_API_KEY}
+      - AI_PREDICTION_URL=http://ai-service:8001/predict
     depends_on:
       - mongodb
+      - ai-service
     restart: always
 
   frontend:
     build: ./frontend
-    container_name: swp1-frontend
     ports:
       - "4200:80"
     depends_on:
@@ -33,3 +46,5 @@ services:
 
 volumes:
   mongo_data:
+  ai_models:
+  ai_data:
