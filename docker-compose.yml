@@ -9,8 +9,8 @@ services:
 
   ai-service:
     build: ./ai-service
-    ports:
-      - "8001:8001"
+    expose:
+      - "8001"
     environment:
       - TRAIN_MODEL_ON_START=${TRAIN_MODEL_ON_START:-false}
       - TRAINING_ROWS=${TRAINING_ROWS:-5000}
@@ -22,8 +22,8 @@ services:
 
   backend:
     build: ./backend
-    ports:
-      - "8080:8080"
+    expose:
+      - "8080"
     environment:
       - MONGODB_URI=${MONGODB_URI:-mongodb://mongodb:27017/swp1}
       - GROQ_API_KEY=${GROQ_API_KEY}
@@ -35,8 +35,8 @@ services:
 
   frontend:
     build: ./frontend
-    ports:
-      - "4200:80"
+    expose:
+      - "80"
     depends_on:
       - backend
     restart: always
