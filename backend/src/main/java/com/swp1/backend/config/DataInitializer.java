@@ -13,6 +13,7 @@ import com.swp1.backend.repository.PoliticaRepository;
 import com.swp1.backend.repository.TramiteRepository;
 import com.swp1.backend.repository.UsuarioRepository;
 import com.swp1.backend.service.WorkflowEngineService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -26,6 +27,12 @@ import java.util.Map;
 
 @Configuration
 public class DataInitializer {
+
+    @Value("${app.demo.bulk-tramites.enabled:true}")
+    private boolean bulkDemoTramitesEnabled;
+
+    @Value("${app.demo.bulk-tramites.count:45}")
+    private int bulkDemoTramitesCount;
 
     @Bean
     CommandLineRunner initDatabase(
@@ -86,6 +93,10 @@ public class DataInitializer {
         seedTramiteReclamoNuevo(tramiteRepository, workflowEngineService);
         seedTramiteReclamoFinalizado(tramiteRepository, workflowEngineService);
         seedTramiteLicenciaNuevo(tramiteRepository, workflowEngineService);
+
+        if (bulkDemoTramitesEnabled) {
+            seedBulkDemoTramites(tramiteRepository, workflowEngineService, Math.max(0, bulkDemoTramitesCount));
+        }
     }
 
     private void seedTramiteNuevoPrestamo(TramiteRepository repository, WorkflowEngineService workflowEngineService) {
@@ -196,6 +207,255 @@ public class DataInitializer {
         repository.save(tramite);
     }
 
+    private void seedBulkDemoTramites(TramiteRepository repository, WorkflowEngineService workflowEngineService, int count) {
+        for (int index = 1; index <= count; index++) {
+            try {
+                int tipo = (index - 1) % 3;
+                int avance = (index - 1) % 5;
+                if (tipo == 0) {
+                    seedBulkPrestamo(repository, workflowEngineService, index, avance);
+                } else if (tipo == 1) {
+                    seedBulkReclamo(repository, workflowEngineService, index, avance);
+                } else {
+                    seedBulkLicencia(repository, workflowEngineService, index, avance);
+                }
+            } catch (Exception e) {
+                System.err.println("No se pudo crear tramite demo masivo #" + index + ": " + e.getMessage());
+            }
+        }
+    }
+
+    private void seedBulkPrestamo(
+            TramiteRepository repository,
+            WorkflowEngineService workflowEngineService,
+            int index,
+            int avance
+    ) {
+        String id = "demo-bulk-prestamo-" + String.format("%03d", index);
+        if (repository.existsById(id)) return;
+
+        String cliente = clienteDemo(index);
+        LocalDateTime inicio = fechaDemo(index);
+        Tramite tramite = startTramite(repository, workflowEngineService, id, "demo-prestamo-personal", cliente);
+        tramite.setFechaInicio(inicio);
+        repository.save(tramite);
+
+        if (avance == 0) return;
+
+        int monto = 8000 + (index * 1300 % 52000);
+        int ingresos = 3500 + (index * 740 % 15000);
+        completeStepAt(repository, workflowEngineService, tramite,
+                "prestamo-solicitud",
+                "Registro de solicitud",
+                "Funcionario",
+                new HashMap<>(),
+                List.of(
+                        fieldValue("cliente", "Nombre completo", "TEXTO", cliente),
+                        fieldValue("ci", "Documento de identidad", "TEXTO", String.valueOf(6000000 + index * 37)),
+                        fieldValue("monto", "Monto solicitado", "NUMERO", String.valueOf(monto)),
+                        fieldValue("plazo", "Plazo en meses", "NUMERO", String.valueOf(12 + (index % 5) * 6))
+                ),
+                "Solicitud registrada con documentos iniciales completos.",
+                inicio.plusHours(1),
+                420L + index % 180);
+
+        if (avance == 1) return;
+
+        boolean aprobado = index % 4 != 0;
+        Map<String, Object> decision = new HashMap<>();
+        decision.put("outcome", aprobado ? "Aprobado" : "Rechazado");
+        completeStepAt(repository, workflowEngineService, tramite,
+                "prestamo-evaluacion",
+                "Evaluacion de riesgo",
+                "Funcionario 2",
+                decision,
+                List.of(
+                        fieldValue("ingresos", "Ingresos mensuales", "NUMERO", String.valueOf(ingresos)),
+                        fieldValue("riesgo", "Nivel de riesgo", "SELECCION", aprobado ? nivelRiesgo(index) : "Alto")
+                ),
+                aprobado ? "Score suficiente para revision final." : "El perfil no cumple los parametros minimos.",
+                inicio.plusHours(5),
+                900L + index % 360);
+
+        if (avance == 2) return;
+
+        if (aprobado) {
+            completeStepAt(repository, workflowEngineService, tramite,
+                    "prestamo-aprobacion",
+                    "Aprobacion final",
+                    "Funcionario 3",
+                    new HashMap<>(),
+                    List.of(fieldValue("dictamen", "Dictamen", "SELECCION", "Aprobar")),
+                    "Prestamo aprobado y notificado para desembolso.",
+                    inicio.plusDays(1),
+                    600L + index % 240);
+        } else {
+            completeStepAt(repository, workflowEngineService, tramite,
+                    "prestamo-rechazo",
+                    "Notificar rechazo",
+                    "Funcionario",
+                    new HashMap<>(),
+                    List.of(fieldValue("motivo", "Motivo comunicado", "TEXTO", "Ingresos insuficientes para el monto solicitado.")),
+                    "Rechazo comunicado al cliente.",
+                    inicio.plusDays(1),
+                    360L + index % 120);
+        }
+    }
+
+    private void seedBulkReclamo(
+            TramiteRepository repository,
+            WorkflowEngineService workflowEngineService,
+            int index,
+            int avance
+    ) {
+        String id = "demo-bulk-reclamo-" + String.format("%03d", index);
+        if (repository.existsById(id)) return;
+
+        String cliente = clienteDemo(index + 50);
+        LocalDateTime inicio = fechaDemo(index + 7);
+        Tramite tramite = startTramite(repository, workflowEngineService, id, "demo-reclamo-servicio", cliente);
+        tramite.setFechaInicio(inicio);
+        repository.save(tramite);
+
+        if (avance == 0) return;
+
+        completeStepAt(repository, workflowEngineService, tramite,
+                "reclamo-registro",
+                "Registro del reclamo",
+                "Funcionario",
+                new HashMap<>(),
+                List.of(
+                        fieldValue("cliente", "Cliente", "TEXTO", cliente),
+                        fieldValue("motivo", "Motivo del reclamo", "TEXTO", motivoReclamo(index))
+                ),
+                "Reclamo registrado y asignado a revision tecnica.",
+                inicio.plusMinutes(50),
+                300L + index % 150);
+
+        if (avance == 1) return;
+
+        boolean procede = index % 3 != 0;
+        Map<String, Object> decision = new HashMap<>();
+        decision.put("outcome", procede ? "Procede" : "No procede");
+        completeStepAt(repository, workflowEngineService, tramite,
+                "reclamo-inspeccion",
+                "Revision tecnica",
+                "Funcionario Tecnico",
+                decision,
+                List.of(
+                        fieldValue("diagnostico", "Diagnostico", "TEXTO", procede ? "Se confirma incidencia en el servicio." : "No se evidencia incumplimiento."),
+                        fieldValue("resultado", "Resultado", "SELECCION", procede ? "Procede" : "No procede")
+                ),
+                procede ? "Corresponde gestionar compensacion." : "Caso listo para comunicacion de cierre.",
+                inicio.plusHours(4),
+                780L + index % 240);
+
+        if (avance == 2) return;
+
+        if (procede) {
+            completeStepAt(repository, workflowEngineService, tramite,
+                    "reclamo-compensacion",
+                    "Gestionar compensacion",
+                    "Funcionario 3",
+                    new HashMap<>(),
+                    List.of(fieldValue("compensacion", "Compensacion propuesta", "TEXTO", "Descuento aplicado en el siguiente ciclo.")),
+                    "Compensacion registrada y caso finalizado.",
+                    inicio.plusDays(1),
+                    520L + index % 180);
+        } else {
+            completeStepAt(repository, workflowEngineService, tramite,
+                    "reclamo-cierre",
+                    "Comunicacion al cliente",
+                    "Funcionario 3",
+                    new HashMap<>(),
+                    List.of(fieldValue("respuesta", "Respuesta enviada", "TEXTO", "Se comunico el resultado de la revision.")),
+                    "Cliente notificado y caso cerrado.",
+                    inicio.plusDays(1),
+                    410L + index % 160);
+        }
+    }
+
+    private void seedBulkLicencia(
+            TramiteRepository repository,
+            WorkflowEngineService workflowEngineService,
+            int index,
+            int avance
+    ) {
+        String id = "demo-bulk-licencia-" + String.format("%03d", index);
+        if (repository.existsById(id)) return;
+
+        String cliente = clienteDemo(index + 100);
+        LocalDateTime inicio = fechaDemo(index + 14);
+        Tramite tramite = startTramite(repository, workflowEngineService, id, "demo-renovacion-licencia", cliente);
+        tramite.setFechaInicio(inicio);
+        repository.save(tramite);
+
+        if (avance == 0) return;
+
+        completeStepAt(repository, workflowEngineService, tramite,
+                "licencia-recepcion",
+                "Recepcion de solicitud",
+                "Funcionario",
+                new HashMap<>(),
+                List.of(
+                        fieldValue("cliente", "Nombre del solicitante", "TEXTO", cliente),
+                        fieldValue("licencia_antigua", "Foto de licencia antigua", "FOTO", "licencia-antigua-" + index + ".jpg"),
+                        fieldValue("documento_identidad", "Documento de identidad", "FOTO", "ci-" + index + ".jpg"),
+                        fieldValue("certificado_medico", "Certificado medico", "ARCHIVO", "certificado-medico-" + index + ".pdf")
+                ),
+                "Documentos recibidos para validacion.",
+                inicio.plusMinutes(35),
+                260L + index % 120);
+
+        if (avance == 1) return;
+
+        boolean aprobado = index % 5 != 0;
+        Map<String, Object> decision = new HashMap<>();
+        decision.put("outcome", aprobado ? "Aprobado" : "Observado");
+        completeStepAt(repository, workflowEngineService, tramite,
+                "licencia-validacion",
+                "Validacion documental",
+                "Funcionario Tecnico",
+                decision,
+                List.of(
+                        fieldValue("observaciones", "Observaciones", "TEXTO", aprobado ? "Documentos correctos." : "Certificado medico requiere correccion."),
+                        fieldValue("resultado", "Resultado", "SELECCION", aprobado ? "Aprobado" : "Observado")
+                ),
+                aprobado ? "Solicitud habilitada para pago y entrega." : "Se requiere subsanar documentos.",
+                inicio.plusHours(3),
+                640L + index % 210);
+
+        if (avance == 2) return;
+
+        if (aprobado) {
+            completeStepAt(repository, workflowEngineService, tramite,
+                    "licencia-pago",
+                    "Pago y entrega",
+                    "Funcionario Caja",
+                    new HashMap<>(),
+                    List.of(
+                            fieldValue("comprobante_pago", "Comprobante de pago", "ARCHIVO", "pago-" + index + ".pdf"),
+                            fieldValue("numero_licencia", "Numero de licencia renovada", "TEXTO", "LIC-" + (2026000 + index))
+                    ),
+                    "Pago confirmado y licencia entregada.",
+                    inicio.plusDays(1),
+                    480L + index % 160);
+        } else {
+            completeStepAt(repository, workflowEngineService, tramite,
+                    "licencia-observacion",
+                    "Solicitar correccion",
+                    "Funcionario",
+                    new HashMap<>(),
+                    List.of(
+                            fieldValue("detalle_observacion", "Detalle de observacion", "TEXTO", "Actualizar certificado medico."),
+                            fieldValue("documento_corregido", "Documento corregido", "ARCHIVO", "pendiente")
+                    ),
+                    "Observacion enviada al solicitante.",
+                    inicio.plusDays(1),
+                    360L + index % 140);
+        }
+    }
+
     private Tramite startTramite(
             TramiteRepository repository,
             WorkflowEngineService workflowEngineService,
@@ -228,16 +488,33 @@ public class DataInitializer {
             List<CampoFormulario> campos,
             String informe
     ) {
+        completeStepAt(repository, workflowEngineService, tramite, nodoId, nombreNodo, usuario, variables, campos,
+                informe, LocalDateTime.now().minusMinutes(8), 720L);
+    }
+
+    private void completeStepAt(
+            TramiteRepository repository,
+            WorkflowEngineService workflowEngineService,
+            Tramite tramite,
+            String nodoId,
+            String nombreNodo,
+            String usuario,
+            Map<String, Object> variables,
+            List<CampoFormulario> campos,
+            String informe,
+            LocalDateTime fechaCompletado,
+            long duracionSegundos
+    ) {
         workflowEngineService.completarTarea(tramite.getId(), variables);
 
         LogActividad log = new LogActividad();
         log.setNodoId(nodoId);
         log.setNombreNodo(nombreNodo);
         log.setUsuario(usuario);
-        log.setFechaCompletado(LocalDateTime.now().minusMinutes(8));
+        log.setFechaCompletado(fechaCompletado);
         log.setDatosFormulario(campos);
         log.setInformeIA(informe);
-        log.setDuracionSegundos(720L);
+        log.setDuracionSegundos(duracionSegundos);
 
         if (tramite.getHistorial() == null) {
             tramite.setHistorial(new ArrayList<>());
@@ -248,6 +525,38 @@ public class DataInitializer {
             tramite.setEstado("FINALIZADO");
         }
         repository.save(tramite);
+    }
+
+    private LocalDateTime fechaDemo(int index) {
+        return LocalDateTime.now()
+                .minusDays(1L + index % 18)
+                .minusHours(index % 9)
+                .minusMinutes((index * 7L) % 50);
+    }
+
+    private String clienteDemo(int index) {
+        List<String> nombres = List.of(
+                "Laura Quiroga", "Miguel Salvatierra", "Valeria Mendoza", "Ruben Paredes",
+                "Natalia Flores", "Jorge Arce", "Daniela Vargas", "Oscar Rojas",
+                "Camila Medina", "Andres Choque", "Patricia Limachi", "Sergio Gutierrez"
+        );
+        return "Cliente Demo - " + nombres.get(index % nombres.size()) + " " + (1000 + index);
+    }
+
+    private String nivelRiesgo(int index) {
+        if (index % 7 == 0) return "Medio";
+        return "Bajo";
+    }
+
+    private String motivoReclamo(int index) {
+        List<String> motivos = List.of(
+                "Demora en atencion",
+                "Cobro no reconocido",
+                "Error en datos registrados",
+                "Servicio incompleto",
+                "Solicitud sin respuesta"
+        );
+        return motivos.get(index % motivos.size());
     }
 
     private PoliticaDeNegocio buildPrestamoPersonalPolicy() {

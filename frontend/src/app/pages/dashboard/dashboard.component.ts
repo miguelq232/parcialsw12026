@@ -133,10 +133,10 @@ import { Router } from '@angular/router';
     .dashboard-shell {
       height: 100%;
       overflow-y: auto;
-      padding: 28px;
+      padding: 20px 28px 84px;
       display: flex;
       flex-direction: column;
-      gap: 20px;
+      gap: 16px;
     }
 
     .topbar, .canvas-panel, .runs-panel, .metric-card {
@@ -147,7 +147,7 @@ import { Router } from '@angular/router';
 
     .topbar {
       border-radius: 8px;
-      padding: 22px 24px;
+      padding: 16px 22px;
       display: flex;
       justify-content: space-between;
       gap: 20px;
@@ -181,7 +181,7 @@ import { Router } from '@angular/router';
 
     .topbar p {
       color: #9ca3af;
-      margin-top: 8px;
+      margin-top: 6px;
       max-width: 680px;
       line-height: 1.45;
     }
@@ -222,7 +222,7 @@ import { Router } from '@angular/router';
 
     .metric-card {
       border-radius: 8px;
-      padding: 16px;
+      padding: 14px 16px;
       display: grid;
       gap: 6px;
     }
@@ -249,12 +249,23 @@ import { Router } from '@angular/router';
       gap: 18px;
       min-height: 0;
       flex: 1;
+      align-items: start;
     }
 
     .canvas-panel, .runs-panel {
       border-radius: 8px;
-      min-height: 420px;
+      min-height: 0;
       overflow: hidden;
+    }
+
+    .canvas-panel,
+    .runs-panel {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .runs-panel {
+      height: clamp(360px, calc(100dvh - 330px), 680px);
     }
 
     .panel-head {
@@ -282,8 +293,10 @@ import { Router } from '@angular/router';
     }
 
     .workflow-canvas {
-      min-height: 520px;
-      padding: 28px;
+      min-height: 0;
+      max-height: calc(100dvh - 330px);
+      overflow: auto;
+      padding: 24px 28px 32px;
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
       align-content: start;
@@ -405,6 +418,11 @@ import { Router } from '@angular/router';
       display: flex;
       flex-direction: column;
       gap: 10px;
+      min-height: 0;
+      flex: 1;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      padding-bottom: 18px;
     }
 
     .run-item {
@@ -416,6 +434,7 @@ import { Router } from '@angular/router';
       border-radius: 8px;
       border: 1px solid #2b2b31;
       background: #18191d;
+      flex: 0 0 auto;
     }
 
     .run-dot {
@@ -513,11 +532,20 @@ import { Router } from '@angular/router';
         grid-template-columns: 1fr;
       }
 
+      .runs-panel {
+        height: auto;
+        max-height: none;
+      }
+
+      .run-list {
+        max-height: 420px;
+      }
+
     }
 
     @media (max-width: 720px) {
       .dashboard-shell {
-        padding: 16px;
+        padding: 16px 16px 80px;
       }
 
       .topbar {
@@ -532,6 +560,7 @@ import { Router } from '@angular/router';
       .workflow-canvas {
         grid-template-columns: 1fr;
         padding: 18px;
+        max-height: none;
       }
 
 
