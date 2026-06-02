@@ -12,7 +12,7 @@ public class PoliticaDeNegocio {
     private String descripcion;
     private List<Nodo> nodos;
     private List<Conexion> conexiones;
-    private List<java.util.Map<String, String>> departamentos;
+    private List<java.util.Map<String, Object>> departamentos;
 
     // Getters and Setters
     public String getId() { return id; }
@@ -25,6 +25,6 @@ public class PoliticaDeNegocio {
     public void setNodos(List<Nodo> nodos) { this.nodos = nodos; }
     public List<Conexion> getConexiones() { return conexiones; }
     public void setConexiones(List<Conexion> conexiones) { this.conexiones = conexiones; }
-    public List<java.util.Map<String, String>> getDepartamentos() { return departamentos; }
-    public void setDepartamentos(List<java.util.Map<String, String>> departamentos) { this.departamentos = departamentos; }
+    public List<java.util.Map<String, Object>> getDepartamentos() { return departamentos; }
+    public void setDepartamentos(List<java.util.Map<String, Object>> departamentos) { this.departamentos = departamentos; }
 }

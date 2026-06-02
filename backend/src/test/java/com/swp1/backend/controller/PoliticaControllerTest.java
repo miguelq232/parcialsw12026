@@ -2,6 +2,7 @@ package com.swp1.backend.controller;
 
 import com.swp1.backend.model.PoliticaDeNegocio;
 import com.swp1.backend.repository.PoliticaRepository;
+import com.swp1.backend.service.WorkflowEngineService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.flowable.engine.RuntimeService;
@@ -33,6 +34,9 @@ public class PoliticaControllerTest {
 
     @MockBean
     private MongoTemplate mongoTemplate;
+
+    @MockBean
+    private WorkflowEngineService workflowEngineService;
 
     @Test
     public void testGetAll() throws Exception {

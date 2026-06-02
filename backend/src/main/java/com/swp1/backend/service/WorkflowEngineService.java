@@ -10,6 +10,8 @@ import org.flowable.engine.RuntimeService;
 import org.flowable.engine.TaskService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 @Service
@@ -47,6 +49,10 @@ public class WorkflowEngineService {
                 UserTask userTask = new UserTask();
                 userTask.setId(nodo.getId());
                 userTask.setName(nodo.getNombre());
+                List<String> candidatos = getFuncionariosAsignados(nodo, politica);
+                if (!candidatos.isEmpty()) {
+                    userTask.setCandidateUsers(candidatos);
+                }
                 process.addFlowElement(userTask);
             } else if (nodo.getTipo() == Nodo.TipoNodo.DECISION) {
                 ExclusiveGateway gateway = new ExclusiveGateway();
@@ -123,5 +129,33 @@ public class WorkflowEngineService {
                 .processInstanceBusinessKey(tramiteId)
                 .singleResult();
         return task != null ? task.getTaskDefinitionKey() : "FIN";
+    }
+
+    private List<String> getFuncionariosAsignados(Nodo nodo, PoliticaDeNegocio politica) {
+        if (nodo.getFuncionariosAsignados() != null && !nodo.getFuncionariosAsignados().isEmpty()) {
+            return nodo.getFuncionariosAsignados();
+        }
+
+        if (politica.getDepartamentos() == null) {
+            return List.of();
+        }
+
+        for (Map<String, Object> departamento : politica.getDepartamentos()) {
+            Object id = departamento.get("id");
+            if (id != null && id.toString().equals(nodo.getDepartamentoId())) {
+                Object asignados = departamento.get("funcionariosAsignados");
+                if (asignados instanceof List<?> lista) {
+                    List<String> candidatos = new ArrayList<>();
+                    for (Object item : lista) {
+                        if (item != null && !item.toString().isBlank()) {
+                            candidatos.add(item.toString());
+                        }
+                    }
+                    return candidatos;
+                }
+            }
+        }
+
+        return List.of();
     }
 }

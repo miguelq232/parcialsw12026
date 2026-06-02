@@ -1,0 +1,4 @@
+-r requirements.txt
+numpy>=1.23,<2
+tensorflow==2.10.1; platform_system == "Windows" and python_version < "3.11"
+tensorflow-cpu>=2.16,<2.19; platform_system != "Windows"

@@ -1,7 +1,14 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { ChangeDetectorRef, Component, OnDestroy, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import * as tf from '@tensorflow/tfjs';
 import { WorkflowService } from '../../services/workflow.service';
+import { AuthService } from '../../services/auth.service';
+
+function getSpeechRecognitionCtor(): any {
+  const win = window as any;
+  return win.SpeechRecognition || win.webkitSpeechRecognition || null;
+}
 
 @Component({
   selector: 'app-monitor',
@@ -73,7 +80,34 @@ import { WorkflowService } from '../../services/workflow.service';
                 <div style="margin-bottom: 16px;">
                   <h4 style="margin: 0; color: var(--primary); text-transform: uppercase; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.05em;">Etapa Actual</h4>
                   <h3 style="margin: 4px 0 0 0; font-size: 1.125rem; color: #1e293b;">{{ currentNode?.nombre }}</h3>
-                  <p style="margin: 2px 0 0 0; font-size: 0.75rem; color: var(--text-muted);">Asignado a: {{ getDeptoName(currentNode?.departamentoId) }}</p>
+                  <p style="margin: 2px 0 0 0; font-size: 0.75rem; color: var(--text-muted);">Calle: {{ getDeptoName(currentNode?.departamentoId, selectedPolicy) }}</p>
+                  <p style="margin: 2px 0 0 0; font-size: 0.75rem; color: var(--text-muted);">Funcionarios: {{ getAssignmentLabel(currentNode, selectedPolicy) }}</p>
+                </div>
+
+                <div class="voice-fill-panel">
+                  <button
+                    type="button"
+                    class="voice-fill-button"
+                    [class.listening]="isListeningToForm"
+                    [disabled]="!voiceSupported || isFillingWithAi || !canCurrentUserWorkSelected()"
+                    (click)="toggleFormVoice()"
+                  >
+                    {{ isListeningToForm ? 'Detener dictado' : 'Dictar datos con TensorFlow' }}
+                  </button>
+                  <button
+                    type="button"
+                    class="voice-fill-button secondary"
+                    [disabled]="isFillingWithAi || !voiceTranscript.trim() || !canCurrentUserWorkSelected()"
+                    (click)="fillCurrentFormFromTranscript(voiceTranscript)"
+                  >
+                    Aplicar texto
+                  </button>
+                  <textarea
+                    class="voice-transcript"
+                    [(ngModel)]="voiceTranscript"
+                    placeholder="Tambien puedes escribir: nombre Juan Perez, carnet 778899, monto 25000, plazo 12 meses"
+                  ></textarea>
+                  <small *ngIf="voiceStatus">{{ voiceStatus }}</small>
                 </div>
 
                 <div class="form-body" style="padding: 0; display: flex; flex-direction: column; gap: 16px; flex: 1;">
@@ -85,7 +119,16 @@ import { WorkflowService } from '../../services/workflow.service';
                         <option *ngFor="let opt of campo.opciones" [value]="opt">{{ opt }}</option>
                       </select>
                       
-                      <input *ngSwitchCase="'FOTO'" type="file" class="minimal-input">
+                      <div *ngSwitchCase="'FOTO'" class="file-field">
+                        <input type="file" accept="image/*" class="minimal-input" (change)="uploadCampoFile(campo, $event)">
+                        <a *ngIf="campo.archivoUrl" [href]="getFileUrl(campo.archivoUrl)" target="_blank">{{ campo.archivoNombre || 'Ver imagen cargada' }}</a>
+                        <small *ngIf="campo.uploading">Subiendo archivo...</small>
+                      </div>
+                      <div *ngSwitchCase="'ARCHIVO'" class="file-field">
+                        <input type="file" [accept]="documentAccept" class="minimal-input" (change)="uploadCampoFile(campo, $event)">
+                        <a *ngIf="campo.archivoUrl" [href]="getFileUrl(campo.archivoUrl)" target="_blank">{{ campo.archivoNombre || 'Ver documento cargado' }}</a>
+                        <small *ngIf="campo.uploading">Subiendo archivo...</small>
+                      </div>
                       <input *ngSwitchCase="'NUMERO'" type="number" [(ngModel)]="campo.valor" class="minimal-input">
                       <input *ngSwitchDefault type="text" [(ngModel)]="campo.valor" class="minimal-input">
                     </ng-container>
@@ -112,9 +155,11 @@ import { WorkflowService } from '../../services/workflow.service';
                 </div>
 
                 <div style="margin-top: 20px;">
-                  <button class="btn-primary" (click)="completar()" [disabled]="getAvailableOutcomes().length > 0 && !selectedOutcome" style="width: 100%; padding: 12px; font-weight: 600;">
+                  <p *ngIf="!canCurrentUserWorkSelected()" style="font-size: 0.78rem; color: #fca5a5 !important; margin: 0 0 10px 0;">Esta tarea esta asignada a otro funcionario.</p>
+                  <button class="btn-primary" (click)="completar()" [disabled]="!canCurrentUserWorkSelected() || hasPendingUploads() || missingRequiredFiles() || (getAvailableOutcomes().length > 0 && !selectedOutcome)" style="width: 100%; padding: 12px; font-weight: 600;">
                     {{ getAvailableOutcomes().length > 0 ? 'Finalizar y Enviar' : 'Finalizar Tarea' }}
                   </button>
+                  <p *ngIf="missingRequiredFiles()" style="font-size: 0.78rem; color: #fca5a5 !important; margin: 10px 0 0 0;">Debes subir todos los documentos solicitados.</p>
                 </div>
               </ng-container>
 
@@ -130,6 +175,54 @@ import { WorkflowService } from '../../services/workflow.service';
 
             <!-- COLUMNA 2: Historial y Progreso -->
             <div style="display: flex; flex-direction: column; gap: 20px; height: 100%; overflow-y: auto; padding-right: 8px;">
+              <div class="modal-section ai-prediction-panel">
+                <div class="ai-prediction-header">
+                  <div>
+                    <h4 class="section-title">Prediccion IA</h4>
+                    <p>Riesgo, ruta sugerida y mejoras del tramite.</p>
+                  </div>
+                  <button type="button" class="voice-fill-button" [disabled]="isLoadingPrediction" (click)="analizarRutaIA()">
+                    {{ isLoadingPrediction ? 'Analizando...' : 'Analizar ruta IA' }}
+                  </button>
+                </div>
+
+                <p *ngIf="predictionError" class="ai-error">{{ predictionError }}</p>
+
+                <div *ngIf="aiPrediction" class="ai-prediction-body">
+                  <div class="ai-metrics">
+                    <div>
+                      <span>Riesgo</span>
+                      <strong [style.color]="getRiskColor(aiPrediction.riskLevel)">{{ aiPrediction.riskLevel || 'N/A' }}</strong>
+                    </div>
+                    <div>
+                      <span>Score</span>
+                      <strong>{{ formatRiskScore(aiPrediction.riskScore) }}</strong>
+                    </div>
+                    <div>
+                      <span>Estimado</span>
+                      <strong>{{ aiPrediction.estimatedDays || 0 }} dias</strong>
+                    </div>
+                  </div>
+
+                  <div *ngIf="aiPrediction.recommendedRoute" class="ai-route">
+                    <span>Ruta recomendada</span>
+                    <strong>{{ aiPrediction.recommendedRoute.targetNodeName || 'Ruta actual' }}</strong>
+                    <small>{{ aiPrediction.recommendedRoute.reason }}</small>
+                  </div>
+
+                  <div class="ai-list" *ngIf="asList(aiPrediction.motives).length">
+                    <span>Motivos</span>
+                    <p *ngFor="let item of asList(aiPrediction.motives)">{{ item }}</p>
+                  </div>
+
+                  <div class="ai-list" *ngIf="asList(aiPrediction.improvements).length">
+                    <span>Mejoras</span>
+                    <p *ngFor="let item of asList(aiPrediction.improvements)">{{ item }}</p>
+                  </div>
+
+                  <small class="ai-engine">Motor: {{ aiPrediction.engine }} / {{ aiPrediction.source }}</small>
+                </div>
+              </div>
               
               <!-- Ruta del Proceso -->
               <div class="modal-section">
@@ -149,7 +242,7 @@ import { WorkflowService } from '../../services/workflow.service';
                     
                     <div class="step-info" style="flex: 1; display: flex; flex-direction: column;">
                       <span class="step-name" style="font-weight: 600; color: #1e293b; font-size: 0.875rem;">{{ node.nombre }}</span>
-                      <span class="step-dept" style="font-size: 0.75rem; color: #64748b;">{{ getDeptoName(node.departamentoId) }}</span>
+                      <span class="step-dept" style="font-size: 0.75rem; color: #64748b;">{{ getDeptoName(node.departamentoId, selectedPolicy) }} / {{ getAssignmentLabel(node, selectedPolicy) }}</span>
                       <span class="step-duration" *ngIf="isNodeCompleted(node.id)" style="font-size: 0.75rem; color: #0ea5e9; font-weight: 500; margin-top: 2px;">⏱️ {{ getDuracionNodo(node.id) }}</span>
                     </div>
 
@@ -174,7 +267,10 @@ import { WorkflowService } from '../../services/workflow.service';
                   <div *ngIf="log.datosFormulario?.length" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
                     <div *ngFor="let c of log.datosFormulario" style="background: #f8fafc; padding: 6px; border-radius: 4px; border: 1px solid #e2e8f0;">
                       <span style="font-size: 0.7rem; font-weight: 700; color: #64748b; display: block;">{{ c.etiqueta }}:</span>
-                      <span style="font-size: 0.813rem; color: #1e293b;">{{ c.valor || 'N/A' }}</span>
+                      <a *ngIf="c.archivoUrl; else plainValue" [href]="getFileUrl(c.archivoUrl)" target="_blank" style="font-size: 0.813rem; color: #2563eb; font-weight: 700; text-decoration: none;">{{ c.archivoNombre || 'Abrir archivo' }}</a>
+                      <ng-template #plainValue>
+                        <span style="font-size: 0.813rem; color: #1e293b;">{{ c.valor || 'N/A' }}</span>
+                      </ng-template>
                     </div>
                   </div>
                   <div *ngIf="log.informeIA" style="margin-top: 8px; padding: 8px; background: #fffbeb; border: 1px dashed #fcd34d; border-radius: 6px;">
@@ -218,6 +314,30 @@ import { WorkflowService } from '../../services/workflow.service';
     .form-field { display: flex; flex-direction: column; gap: 6px; }
     .form-field label { font-size: 0.75rem; color: var(--text-muted); }
     .minimal-input { padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; }
+    .voice-fill-panel { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px; padding: 12px; border: 1px solid #34353c; border-radius: 8px; background: #202126; }
+    .voice-fill-button { min-height: 36px; border: 1px solid #fb923c; border-radius: 6px; background: #f97316; color: #111113; font-weight: 800; cursor: pointer; }
+    .voice-fill-button.secondary { border-color: #3f4652; background: #262a31; color: #e5e7eb; }
+    .voice-fill-button.listening { box-shadow: 0 0 0 4px rgba(249, 115, 22, 0.18); }
+    .voice-fill-button:disabled { border-color: #3a3a42; background: #3a3a42; color: #6b7280; cursor: not-allowed; box-shadow: none; }
+    .voice-transcript { grid-column: 1 / -1; min-height: 64px; height: 64px; }
+    .voice-fill-panel small { grid-column: 1 / -1; color: #fdba74; font-size: 0.74rem; line-height: 1.3; }
+    .ai-prediction-panel { display: grid; gap: 12px; }
+    .ai-prediction-header { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+    .ai-prediction-header p { margin: -6px 0 0 0; color: #9ca3af; font-size: 0.78rem; }
+    .ai-prediction-header .voice-fill-button { min-width: 140px; padding: 0 12px; }
+    .ai-error { color: #fca5a5 !important; font-size: 0.8rem; margin: 0; }
+    .ai-prediction-body { display: grid; gap: 12px; }
+    .ai-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    .ai-metrics div, .ai-route, .ai-list { background: #202126; border: 1px solid #33343a; border-radius: 8px; padding: 10px; }
+    .ai-metrics span, .ai-route span, .ai-list span { display: block; color: #9ca3af; font-size: 0.7rem; font-weight: 800; text-transform: uppercase; margin-bottom: 4px; }
+    .ai-metrics strong, .ai-route strong { color: #f8fafc; font-size: 1rem; }
+    .ai-route { display: grid; gap: 3px; }
+    .ai-route small, .ai-engine { color: #9ca3af; font-size: 0.74rem; }
+    .ai-list { display: grid; gap: 6px; }
+    .ai-list p { margin: 0; color: #e5e7eb !important; font-size: 0.8rem; line-height: 1.35; }
+    .file-field { display: grid; gap: 6px; }
+    .file-field a { color: #2563eb; font-size: 0.8rem; font-weight: 600; text-decoration: none; }
+    .file-field small { color: var(--text-muted); font-size: 0.74rem; }
     .report-area { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
     .report-area label { font-size: 0.75rem; color: var(--text-muted); }
     textarea { padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; height: 120px; resize: none; }
@@ -574,16 +694,32 @@ import { WorkflowService } from '../../services/workflow.service';
     }
   `]
 })
-export class MonitorComponent implements OnInit {
+export class MonitorComponent implements OnInit, OnDestroy {
   private workflowService = inject(WorkflowService);
+  private cdr = inject(ChangeDetectorRef);
+  public auth = inject(AuthService);
   tramites: any[] = [];
   selectedTramite: any = null;
+  selectedPolicy: any = null;
   currentNode: any = null;
   policyNodes: any[] = [];
   policyConnections: any[] = [];
   selectedOutcome: string = '';
   iaReport: string = '';
   showModal: boolean = false;
+  documentAccept = '.pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.webp,.txt';
+  voiceSupported = getSpeechRecognitionCtor() !== null;
+  isListeningToForm = false;
+  isFillingWithAi = false;
+  voiceTranscript = '';
+  voiceStatus = '';
+  aiPrediction: any = null;
+  isLoadingPrediction = false;
+  predictionError = '';
+  private speechRecognition: any = null;
+  private voiceFinalTranscript = '';
+  private shouldProcessVoiceOnEnd = false;
+  private voiceRestartAttempts = 0;
 
   openModal() {
     this.showModal = true;
@@ -599,8 +735,15 @@ export class MonitorComponent implements OnInit {
   ngOnInit() { 
     this.workflowService.getPolicies().subscribe(policies => {
       this.policies = policies;
+      this.updateLanes();
       this.loadTramites(); 
     }); 
+  }
+
+  ngOnDestroy() {
+    if (this.speechRecognition) {
+      this.speechRecognition.abort();
+    }
   }
 
   getTramiteLane(t: any): string {
@@ -612,11 +755,11 @@ export class MonitorComponent implements OnInit {
     const node = pol.nodos.find((n: any) => n.id === t.nodoActualId);
     if (!node) return 'Sin Asignar';
     
-    return this.getDeptoName(node.departamentoId);
+    return this.getDeptoName(node.departamentoId, pol);
   }
 
   getTramitesByLane(lane: string): any[] {
-    return this.tramites.filter(t => this.getTramiteLane(t) === lane);
+    return this.tramites.filter(t => this.getTramiteLane(t) === lane && this.canCurrentUserSeeTramite(t));
   }
 
   loadTramites() {
@@ -635,10 +778,18 @@ export class MonitorComponent implements OnInit {
   seleccionarTramite(t: any) {
     this.selectedTramite = t;
     this.iaReport = '';
+    this.voiceTranscript = '';
+    this.voiceStatus = '';
+    this.aiPrediction = null;
+    this.predictionError = '';
+    this.isLoadingPrediction = false;
     this.policyNodes = [];
     
     this.workflowService.getPolicies().subscribe(policies => {
+      this.policies = policies;
+      this.updateLanes();
       const p = policies.find(pol => pol.id === t.politicaId);
+      this.selectedPolicy = p || null;
       this.policyNodes = p?.nodos || [];
       this.policyConnections = p?.conexiones || [];
       this.selectedOutcome = '';
@@ -652,13 +803,114 @@ export class MonitorComponent implements OnInit {
     });
   }
 
-  getDeptoName(id: string): string {
+  analizarRutaIA() {
+    if (!this.selectedTramite?.id) return;
+
+    this.isLoadingPrediction = true;
+    this.predictionError = '';
+    this.aiPrediction = null;
+
+    this.workflowService.getTramitePrediction(this.selectedTramite.id).subscribe({
+      next: response => {
+        this.aiPrediction = response;
+        this.isLoadingPrediction = false;
+      },
+      error: err => {
+        this.isLoadingPrediction = false;
+        this.predictionError = err.error?.error || 'No se pudo generar la prediccion del tramite.';
+      }
+    });
+  }
+
+  asList(value: any): string[] {
+    return Array.isArray(value) ? value : [];
+  }
+
+  formatRiskScore(value: any): string {
+    const number = Number(value);
+    return Number.isFinite(number) ? `${Math.round(number)}%` : 'N/A';
+  }
+
+  getRiskColor(level: string): string {
+    const normalized = this.normalizeText(level);
+    if (normalized === 'alto') return '#f87171';
+    if (normalized === 'medio') return '#fb923c';
+    return '#86efac';
+  }
+
+  getDeptoName(id: string, policy?: any): string {
+    const dept = policy?.departamentos?.find((d: any) => d.id === id);
+    if (dept) return dept.nombre;
+
+    for (const p of this.policies) {
+      const found = p.departamentos?.find((d: any) => d.id === id);
+      if (found) return found.nombre;
+    }
+
     const deptos: any = { '1': 'Atención al Cliente', '2': 'Técnico', '3': 'Dirección' };
     return deptos[id] || 'General';
   }
 
+  updateLanes() {
+    const laneNames = new Set<string>();
+    this.policies.forEach(policy => {
+      (policy.departamentos || []).forEach((dept: any) => {
+        if (dept.nombre) laneNames.add(dept.nombre);
+      });
+    });
+
+    if (laneNames.size === 0) {
+      ['Atencion al Cliente', 'Tecnico', 'Direccion'].forEach(name => laneNames.add(name));
+    }
+
+    laneNames.add('Finalizados');
+    this.lanes = Array.from(laneNames);
+  }
+
+  canCurrentUserSeeTramite(t: any): boolean {
+    if (this.auth.isAdmin()) return true;
+    if (t.estado === 'FINALIZADO') return false;
+
+    const policy = this.policies.find(p => p.id === t.politicaId);
+    const node = policy?.nodos?.find((n: any) => n.id === t.nodoActualId);
+    return this.canCurrentUserWorkOnNode(node, policy);
+  }
+
+  canCurrentUserWorkSelected(): boolean {
+    return this.canCurrentUserWorkOnNode(this.currentNode, this.selectedPolicy);
+  }
+
+  canCurrentUserWorkOnNode(node: any, policy?: any): boolean {
+    if (this.auth.isAdmin()) return true;
+    if (!node) return false;
+
+    const assignees = this.getAssigneesForNode(node, policy);
+    if (assignees.length === 0) return false;
+
+    const username = this.auth.currentUser()?.username || '';
+    return assignees.includes(username);
+  }
+
+  getAssignmentLabel(node: any, policy?: any): string {
+    const assignees = this.getAssigneesForNode(node, policy);
+    if (assignees.length === 0) return 'Sin funcionario asignado';
+    return assignees.join(', ');
+  }
+
+  getAssigneesForNode(node: any, policy?: any): string[] {
+    if (!node) return [];
+    if (node.funcionariosAsignados?.length) return node.funcionariosAsignados;
+
+    const dept = policy?.departamentos?.find((d: any) => d.id === node.departamentoId);
+    return dept?.funcionariosAsignados || [];
+  }
+
   isNodeCompleted(nodeId: string): boolean {
     if (!this.selectedTramite || !this.selectedTramite.historial) return false;
+    const node = this.policyNodes.find((item: any) => item.id === nodeId);
+    if (node?.tipo === 'INICIO' || node?.tipo === 'START') {
+      return Boolean(this.selectedTramite.fechaInicio);
+    }
     return this.selectedTramite.historial.some((h: any) => h.nodoId === nodeId);
   }
 
@@ -713,7 +965,696 @@ export class MonitorComponent implements OnInit {
     return outgoing.map(c => c.condicion);
   }
 
+  toggleFormVoice() {
+    if (this.isListeningToForm) {
+      this.stopFormVoice();
+      return;
+    }
+
+    this.startFormVoice();
+  }
+
+  startFormVoice() {
+    const SpeechRecognitionCtor = getSpeechRecognitionCtor();
+    if (!SpeechRecognitionCtor) {
+      this.voiceSupported = false;
+      this.voiceStatus = 'Tu navegador no soporta dictado por voz. Usa Chrome o Edge.';
+      return;
+    }
+
+    if (this.speechRecognition) {
+      this.speechRecognition.abort();
+      this.speechRecognition = null;
+    }
+
+    this.voiceFinalTranscript = '';
+    this.shouldProcessVoiceOnEnd = false;
+    this.voiceRestartAttempts = 0;
+    this.voiceTranscript = '';
+    this.createAndStartFormRecognition(SpeechRecognitionCtor);
+  }
+
+  createAndStartFormRecognition(SpeechRecognitionCtor: any) {
+    const recognition = new SpeechRecognitionCtor();
+    recognition.lang = 'es-BO';
+    recognition.interimResults = true;
+    recognition.continuous = true;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => {
+      this.isListeningToForm = true;
+      this.voiceStatus = 'Escuchando datos del formulario... presiona Detener dictado cuando termines.';
+      this.cdr.detectChanges();
+    };
+
+    recognition.onresult = (event: any) => {
+      let interimTranscript = '';
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0]?.transcript || '';
+        if (event.results[i].isFinal) {
+          this.voiceFinalTranscript = `${this.voiceFinalTranscript} ${transcript}`.trim();
+        } else {
+          interimTranscript += transcript;
+        }
+      }
+
+      const spokenText = `${this.voiceFinalTranscript} ${interimTranscript}`.trim();
+      if (spokenText) {
+        this.voiceTranscript = spokenText;
+      }
+      this.cdr.detectChanges();
+    };
+
+    recognition.onerror = (event: any) => {
+      this.isListeningToForm = false;
+      this.voiceStatus = event.error === 'not-allowed'
+        ? 'Permite el microfono en el navegador para dictar datos.'
+        : 'No pude escuchar bien. Intenta de nuevo.';
+      this.cdr.detectChanges();
+    };
+
+    recognition.onend = () => {
+      this.speechRecognition = null;
+      const command = this.voiceFinalTranscript.trim() || this.voiceTranscript.trim();
+
+      if (!this.shouldProcessVoiceOnEnd && this.isListeningToForm) {
+        if (this.voiceRestartAttempts < 8) {
+          this.voiceRestartAttempts++;
+          setTimeout(() => this.createAndStartFormRecognition(SpeechRecognitionCtor), 250);
+          return;
+        }
+
+        this.shouldProcessVoiceOnEnd = true;
+      }
+
+      this.isListeningToForm = false;
+
+      if (command) {
+        this.voiceTranscript = command;
+        this.voiceStatus = 'Texto detectado. Llenando campos...';
+        this.cdr.detectChanges();
+        this.fillCurrentFormFromTranscript(command);
+      } else if (!this.voiceStatus.includes('Permite')) {
+        this.voiceStatus = 'No detecte audio. Intenta de nuevo.';
+        this.cdr.detectChanges();
+      }
+    };
+
+    this.speechRecognition = recognition;
+    recognition.start();
+  }
+
+  stopFormVoice() {
+    this.shouldProcessVoiceOnEnd = true;
+    this.voiceStatus = 'Procesando dictado...';
+    if (!this.speechRecognition) {
+      const command = this.voiceFinalTranscript.trim() || this.voiceTranscript.trim();
+      this.isListeningToForm = false;
+      if (command) {
+        this.fillCurrentFormFromTranscript(command);
+      }
+      return;
+    }
+
+    this.speechRecognition.stop();
+  }
+
+  fillCurrentFormFromTranscript(transcript: string) {
+    if (!transcript.trim() || !this.currentNode) return;
+
+    this.isFillingWithAi = true;
+    this.voiceStatus = 'TensorFlow esta identificando los campos...';
+
+    const formContext = {
+      etapaActual: this.currentNode.nombre,
+      calle: this.getDeptoName(this.currentNode.departamentoId, this.selectedPolicy),
+      campos: (this.currentNode.campos || []).map((campo: any) => ({
+        nombre: campo.nombre,
+        etiqueta: campo.etiqueta,
+        tipo: campo.tipo,
+        opciones: campo.opciones || []
+      })),
+      rutasDisponibles: this.getAvailableOutcomes()
+    };
+
+    const tensorflowResponse = this.buildTensorFlowFormFillResponse(transcript, formContext);
+    const tensorflowUpdated = this.applyAiFormFillResponse(tensorflowResponse);
+    const totalFillable = this.getFillableFields().length;
+    const filledAfterTensorFlow = this.countFilledFields();
+
+    if (filledAfterTensorFlow >= totalFillable) {
+      this.isFillingWithAi = false;
+      this.voiceStatus = `TensorFlow lleno ${filledAfterTensorFlow} campo${filledAfterTensorFlow === 1 ? '' : 's'}.`;
+      return;
+    }
+
+    this.voiceStatus = `TensorFlow lleno ${filledAfterTensorFlow} de ${totalFillable}. Completando con Groq...`;
+
+    this.workflowService.sendFormFillCommand(transcript, formContext).subscribe({
+      next: response => {
+        this.isFillingWithAi = false;
+
+        if (response.error) {
+          this.voiceStatus = 'Error: ' + response.error;
+          return;
+        }
+
+        const updated = this.applyAiFormFillResponse(response);
+        const totalFilled = this.countFilledFields();
+        this.voiceStatus = response.message || `Campos completados: ${totalFilled}. Groq ajusto ${updated}.`;
+      },
+      error: () => {
+        this.isFillingWithAi = false;
+        this.voiceStatus = 'No pude conectar con el backend para llenar el formulario.';
+      }
+    });
+  }
+
+  buildTensorFlowFormFillResponse(transcript: string, formContext: any): any {
+    const fillableFields = this.getFillableFields();
+    const candidates = this.extractTensorFlowCandidates(transcript, fillableFields);
+
+    if (!fillableFields.length || !candidates.length) {
+      return { message: 'TensorFlow no encontro campos para llenar.', fields: [] };
+    }
+
+    const fieldTexts = fillableFields.map(field => this.getFieldSemanticText(field));
+    const candidateTexts = candidates.map(candidate => candidate.clue);
+    const similarityMatrix = this.computeTensorFlowSimilarities(candidateTexts, fieldTexts);
+    const fields: Array<{ nombre: string; valor: string }> = [];
+    const usedFields = new Set<string>();
+
+    candidates.forEach((candidate, candidateIndex) => {
+      const scores = similarityMatrix[candidateIndex] || [];
+      let bestIndex = -1;
+      let bestScore = 0;
+
+      scores.forEach((score, index) => {
+        if (score > bestScore) {
+          bestScore = score;
+          bestIndex = index;
+        }
+      });
+
+      const targetField = fillableFields[bestIndex];
+      if (!targetField || usedFields.has(targetField.nombre) || bestScore < 0.12) return;
+
+      const value = this.cleanTensorFlowValue(candidate.value, targetField);
+      if (!value) return;
+
+      fields.push({ nombre: targetField.nombre, valor: value });
+      usedFields.add(targetField.nombre);
+    });
+
+    this.addHeuristicTensorFlowFields(transcript, fillableFields, fields, usedFields);
+
+    return {
+      message: fields.length ? 'TensorFlow completo campos desde el dictado.' : 'TensorFlow no encontro valores claros.',
+      fields,
+      engine: 'tensorflow-js',
+      etapaActual: formContext.etapaActual
+    };
+  }
+
+  getFillableFields(): any[] {
+    return (this.currentNode?.campos || [])
+      .filter((campo: any) => campo.tipo !== 'FOTO' && campo.tipo !== 'ARCHIVO');
+  }
+
+  countFilledFields(): number {
+    return this.getFillableFields().filter((campo: any) => String(campo.valor || '').trim().length > 0).length;
+  }
+
+  addHeuristicTensorFlowFields(
+    transcript: string,
+    fields: any[],
+    results: Array<{ nombre: string; valor: string }>,
+    usedFields: Set<string>
+  ): void {
+    const normalizedTranscript = this.normalizeText(transcript);
+    const allAliases = fields.flatMap(field => this.getFieldAliases(field).map(alias => this.normalizeText(alias)));
+    const numbers = this.extractNumericValues(normalizedTranscript);
+    const usedNumbers = new Set<string>(
+      results
+        .map(item => String(item.valor || '').match(/\d+(?:[.,]\d+)?/)?.[0]?.replace(',', '.'))
+        .filter((value): value is string => Boolean(value))
+    );
+
+    fields.forEach(field => {
+      if (usedFields.has(field.nombre)) return;
+
+      let value = this.extractValueNearFieldAlias(normalizedTranscript, field, allAliases);
+      if (!value) {
+        value = this.inferValueByFieldKind(normalizedTranscript, field, numbers, usedNumbers, allAliases);
+      }
+
+      value = this.cleanTensorFlowValue(value, field);
+      if (!value) return;
+
+      results.push({ nombre: field.nombre, valor: value });
+      usedFields.add(field.nombre);
+    });
+  }
+
+  extractValueNearFieldAlias(transcript: string, field: any, allAliases: string[]): string {
+    const aliases = this.getFieldAliases(field)
+      .map(alias => this.normalizeText(alias))
+      .filter(alias => alias.length > 1)
+      .sort((a, b) => b.length - a.length);
+
+    for (const alias of aliases) {
+      const match = new RegExp(`\\b${this.escapeRegExp(alias)}\\b`).exec(transcript);
+      if (!match) continue;
+
+      let value = transcript.slice(match.index + match[0].length).trim();
+      value = value.replace(/^(es|son|sera|seria|de|del|numero|nro|no|con|por|para|el|la|los|las|mi|su)\s+/g, '');
+      return this.trimAtNextAlias(value, allAliases);
+    }
+
+    return '';
+  }
+
+  trimAtNextAlias(value: string, aliases: string[]): string {
+    let endIndex = value.length;
+    aliases.forEach(alias => {
+      if (!alias) return;
+      const match = new RegExp(`\\b${this.escapeRegExp(alias)}\\b`).exec(value);
+      if (match && match.index > 0 && match.index < endIndex) {
+        endIndex = match.index;
+      }
+    });
+
+    return value.slice(0, endIndex)
+      .replace(/\b(y|tambien|ademas|luego|despues|mi|su|el|la|los|las)$/g, '')
+      .trim();
+  }
+
+  inferValueByFieldKind(
+    transcript: string,
+    field: any,
+    numbers: string[],
+    usedNumbers: Set<string>,
+    allAliases: string[]
+  ): string {
+    const kind = this.getFieldKind(field);
+
+    if (kind === 'name') {
+      const beforeFirstNumber = transcript.split(/\b\d+\b/)[0] || '';
+      const beforeOtherField = this.trimAtNextAlias(beforeFirstNumber, allAliases.filter(alias =>
+        !['nombre', 'nombre completo', 'cliente', 'solicitante'].includes(alias)
+      ));
+      const cleanedName = beforeOtherField
+        .replace(/\b(nombre|completo|cliente|solicitante|es|mi|su|el|la|del|de|dato|datos)\b/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      if (!cleanedName || this.isFieldMarkerOnly(cleanedName)) return '';
+      return cleanedName;
+    }
+
+    if (kind === 'document') {
+      return this.pickNumber(numbers, usedNumbers, number => number.length >= 5);
+    }
+
+    if (kind === 'amount') {
+      if (!this.hasAnyAlias(transcript, ['monto', 'monto solicitado', 'importe', 'cantidad'])) return '';
+      return this.pickNumber(numbers, usedNumbers, number => Number(number) > 120);
+    }
+
+    if (kind === 'term') {
+      if (!this.hasAnyAlias(transcript, ['plazo', 'plazo en meses', 'plazo meses', 'mes', 'meses'])) return '';
+      return this.pickNumber([...numbers].reverse(), usedNumbers, number => Number(number) > 0 && Number(number) <= 120);
+    }
+
+    if (field.tipo === 'NUMERO') {
+      return this.pickNumber(numbers, usedNumbers, () => true);
+    }
+
+    return '';
+  }
+
+  hasAnyAlias(transcript: string, aliases: string[]): boolean {
+    return aliases.some(alias => new RegExp(`\\b${this.escapeRegExp(this.normalizeText(alias))}\\b`).test(transcript));
+  }
+
+  isFieldMarkerOnly(value: string): boolean {
+    const markerWords = new Set([
+      'carnet', 'carne', 'ci', 'cedula', 'documento', 'identidad',
+      'monto', 'importe', 'cantidad', 'plazo', 'mes', 'meses'
+    ]);
+    const words = this.tokenizeTensorText(value);
+    return words.length > 0 && words.every(word => markerWords.has(word));
+  }
+
+  pickNumber(numbers: string[], usedNumbers: Set<string>, predicate: (number: string) => boolean): string {
+    const number = numbers.find(item => !usedNumbers.has(item) && predicate(item));
+    if (number) {
+      usedNumbers.add(number);
+    }
+    return number || '';
+  }
+
+  extractNumericValues(transcript: string): string[] {
+    const digitValues = Array.from(transcript.matchAll(/\b\d+(?:[.,]\d+)?\b/g))
+      .map(match => match[0].replace(',', '.'));
+
+    const wordNumbers: string[] = [];
+    const tokens = transcript.split(/\s+/).filter(Boolean);
+    let buffer: string[] = [];
+
+    tokens.forEach(token => {
+      if (this.isSpanishNumberToken(token)) {
+        buffer.push(token);
+        return;
+      }
+
+      if (buffer.length) {
+        const parsed = this.parseSpanishNumber(buffer.join(' '));
+        if (parsed > 0) {
+          wordNumbers.push(String(parsed));
+        }
+        buffer = [];
+      }
+    });
+
+    if (buffer.length) {
+      const parsed = this.parseSpanishNumber(buffer.join(' '));
+      if (parsed > 0) {
+        wordNumbers.push(String(parsed));
+      }
+    }
+
+    return Array.from(new Set([...digitValues, ...wordNumbers]));
+  }
+
+  isSpanishNumberToken(token: string): boolean {
+    return [
+      'cero', 'uno', 'una', 'un', 'dos', 'tres', 'cuatro', 'cinco', 'seis', 'siete', 'ocho', 'nueve',
+      'diez', 'once', 'doce', 'trece', 'catorce', 'quince', 'dieciseis', 'diecisiete', 'dieciocho', 'diecinueve',
+      'veinte', 'veintiuno', 'veintidos', 'veintitres', 'veinticuatro', 'veinticinco', 'veintiseis', 'veintisiete', 'veintiocho', 'veintinueve',
+      'treinta', 'cuarenta', 'cincuenta', 'sesenta', 'setenta', 'ochenta', 'noventa', 'cien', 'ciento',
+      'doscientos', 'trescientos', 'cuatrocientos', 'quinientos', 'seiscientos', 'setecientos', 'ochocientos', 'novecientos',
+      'mil', 'millon', 'millones'
+    ].includes(token);
+  }
+
+  parseSpanishNumber(text: string): number {
+    const units: Record<string, number> = {
+      cero: 0, uno: 1, una: 1, un: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7, ocho: 8, nueve: 9,
+      diez: 10, once: 11, doce: 12, trece: 13, catorce: 14, quince: 15, dieciseis: 16, diecisiete: 17, dieciocho: 18, diecinueve: 19,
+      veinte: 20, veintiuno: 21, veintidos: 22, veintitres: 23, veinticuatro: 24, veinticinco: 25, veintiseis: 26, veintisiete: 27, veintiocho: 28, veintinueve: 29,
+      treinta: 30, cuarenta: 40, cincuenta: 50, sesenta: 60, setenta: 70, ochenta: 80, noventa: 90,
+      cien: 100, ciento: 100, doscientos: 200, trescientos: 300, cuatrocientos: 400, quinientos: 500, seiscientos: 600, setecientos: 700, ochocientos: 800, novecientos: 900
+    };
+
+    let total = 0;
+    let current = 0;
+
+    this.normalizeText(text).split(/\s+/).forEach(token => {
+      if (token === 'mil') {
+        total += (current || 1) * 1000;
+        current = 0;
+      } else if (token === 'millon' || token === 'millones') {
+        total += (current || 1) * 1000000;
+        current = 0;
+      } else if (units[token] != null) {
+        current += units[token];
+      }
+    });
+
+    return total + current;
+  }
+
+  getFieldKind(field: any): 'name' | 'document' | 'amount' | 'term' | 'generic' {
+    const normalized = this.normalizeText(`${field.etiqueta || ''} ${field.nombre || ''}`);
+
+    if (/(nombre|cliente|solicitante)/.test(normalized)) return 'name';
+    if (/(documento|identidad|carnet|cedula|ci)/.test(normalized)) return 'document';
+    if (/(monto|importe|cantidad)/.test(normalized)) return 'amount';
+    if (/(plazo|mes)/.test(normalized)) return 'term';
+
+    return 'generic';
+  }
+
+  extractTensorFlowCandidates(transcript: string, fields: any[]): Array<{ clue: string; value: string }> {
+    const normalizedTranscript = this.normalizeText(transcript);
+    const aliases = fields.flatMap((field: any) =>
+      this.getFieldAliases(field).map(alias => this.normalizeText(alias)).filter(alias => alias.length > 1)
+    );
+    const uniqueAliases = Array.from(new Set(aliases)).sort((a, b) => b.length - a.length);
+    const matches: Array<{ alias: string; start: number; end: number }> = [];
+
+    uniqueAliases.forEach(alias => {
+      const pattern = new RegExp(`\\b${this.escapeRegExp(alias)}\\b`, 'g');
+      let match: RegExpExecArray | null;
+      while ((match = pattern.exec(normalizedTranscript)) !== null) {
+        matches.push({ alias, start: match.index, end: match.index + match[0].length });
+      }
+    });
+
+    const orderedMatches = matches
+      .sort((a, b) => a.start - b.start || b.alias.length - a.alias.length)
+      .filter((match, index, all) => {
+        const previous = all[index - 1];
+        return !previous || match.start >= previous.end;
+      });
+
+    if (!orderedMatches.length) {
+      return this.extractFallbackCandidates(normalizedTranscript);
+    }
+
+    return orderedMatches
+      .map((match, index) => {
+        const next = orderedMatches[index + 1];
+        return {
+          clue: match.alias,
+          value: normalizedTranscript.slice(match.end, next ? next.start : normalizedTranscript.length).trim()
+        };
+      })
+      .filter(candidate => candidate.value.length > 0);
+  }
+
+  extractFallbackCandidates(normalizedTranscript: string): Array<{ clue: string; value: string }> {
+    return normalizedTranscript
+      .split(/[,;]+/)
+      .map(part => part.trim())
+      .filter(Boolean)
+      .map(part => {
+        const words = part.split(/\s+/);
+        return {
+          clue: words.slice(0, Math.min(3, words.length)).join(' '),
+          value: words.slice(Math.min(2, words.length)).join(' ')
+        };
+      })
+      .filter(candidate => candidate.value.length > 0);
+  }
+
+  computeTensorFlowSimilarities(candidateTexts: string[], fieldTexts: string[]): number[][] {
+    const vocabulary = this.buildTensorVocabulary([...candidateTexts, ...fieldTexts]);
+    if (!vocabulary.length) {
+      return candidateTexts.map(() => fieldTexts.map(() => 0));
+    }
+
+    const candidateVectors = candidateTexts.map(text => this.vectorizeText(text, vocabulary));
+    const fieldVectors = fieldTexts.map(text => this.vectorizeText(text, vocabulary));
+
+    return tf.tidy(() => {
+      const candidateTensor = tf.tensor2d(candidateVectors);
+      const fieldTensor = tf.tensor2d(fieldVectors);
+      const candidateNorms = tf.sqrt(tf.sum(tf.square(candidateTensor), 1)).expandDims(1).add(1e-6);
+      const fieldNorms = tf.sqrt(tf.sum(tf.square(fieldTensor), 1)).expandDims(1).add(1e-6);
+      const normalizedCandidates = candidateTensor.div(candidateNorms);
+      const normalizedFields = fieldTensor.div(fieldNorms);
+      return normalizedCandidates.matMul(normalizedFields.transpose()).arraySync() as number[][];
+    });
+  }
+
+  buildTensorVocabulary(texts: string[]): string[] {
+    const stopWords = new Set(['de', 'del', 'la', 'el', 'los', 'las', 'en', 'por', 'para', 'con', 'un', 'una', 'y']);
+    return Array.from(new Set(
+      texts.flatMap(text => this.tokenizeTensorText(text)).filter(token => !stopWords.has(token))
+    ));
+  }
+
+  vectorizeText(text: string, vocabulary: string[]): number[] {
+    const tokens = this.tokenizeTensorText(text);
+    return vocabulary.map(term => tokens.filter(token => token === term).length / Math.max(tokens.length, 1));
+  }
+
+  tokenizeTensorText(text: string): string[] {
+    return this.normalizeText(text)
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter(Boolean);
+  }
+
+  getFieldSemanticText(field: any): string {
+    return this.getFieldAliases(field).join(' ');
+  }
+
+  getFieldAliases(field: any): string[] {
+    const label = `${field.etiqueta || ''} ${field.nombre || ''}`;
+    const normalized = this.normalizeText(label);
+    const aliases = [field.etiqueta, field.nombre];
+
+    if (/(nombre|cliente|solicitante)/.test(normalized)) {
+      aliases.push('nombre', 'nombre completo', 'cliente', 'solicitante');
+    }
+
+    if (/(documento|identidad|carnet|cedula|ci)/.test(normalized)) {
+      aliases.push('documento', 'documento de identidad', 'carnet', 'carne', 'carnet de identidad', 'numero de carnet', 'cedula', 'ci');
+    }
+
+    if (/(monto|importe|cantidad)/.test(normalized)) {
+      aliases.push('monto', 'monto solicitado', 'importe', 'cantidad');
+    }
+
+    if (/(plazo|mes)/.test(normalized)) {
+      aliases.push('plazo', 'plazo en meses', 'plazo meses');
+    }
+
+    if (/(ingreso|salario)/.test(normalized)) {
+      aliases.push('ingresos', 'ingresos mensuales', 'salario');
+    }
+
+    if (/(riesgo|resultado|dictamen|decision)/.test(normalized)) {
+      aliases.push('resultado', 'dictamen', 'decision');
+    }
+
+    return Array.from(new Set(aliases.filter(Boolean).map(alias => String(alias))));
+  }
+
+  cleanTensorFlowValue(value: string, field: any): string {
+    let cleaned = this.normalizeText(value)
+      .replace(/^(es|son|de|del|el|la|los|las|numero|nro|no|con|por|en|para|solicitado|solicitada)\s+/g, '')
+      .replace(/\b(bolivianos|bs|meses|mes)\b/g, '')
+      .trim();
+
+    if (field.tipo === 'NUMERO') {
+      const numericValue = cleaned.match(/\d+(?:[.,]\d+)?/)?.[0]?.replace(',', '.');
+      if (numericValue) return numericValue;
+
+      const parsed = this.parseSpanishNumber(cleaned);
+      return parsed > 0 ? String(parsed) : '';
+    }
+
+    if (field.tipo === 'SELECCION') {
+      const selected = (field.opciones || []).find((option: string) =>
+        this.normalizeText(option) === cleaned || cleaned.includes(this.normalizeText(option))
+      );
+      return selected || '';
+    }
+
+    return cleaned
+      .replace(/\b(y|tambien|ademas|luego|despues|mi|su|el|la|los|las)$/g, '')
+      .trim();
+  }
+
+  escapeRegExp(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  applyAiFormFillResponse(response: any): number {
+    let updated = 0;
+    const fields = Array.isArray(response.fields) ? response.fields : [];
+
+    fields.forEach((item: any) => {
+      const target = this.findCampoForAiValue(item);
+      if (!target || target.tipo === 'FOTO' || target.tipo === 'ARCHIVO') return;
+
+      target.valor = String(item.valor ?? '').trim();
+      if (target.valor) {
+        updated++;
+      }
+    });
+
+    if (response.outcome && this.getAvailableOutcomes().includes(response.outcome)) {
+      this.selectedOutcome = response.outcome;
+    }
+
+    if (response.informe) {
+      this.iaReport = this.iaReport
+        ? `${this.iaReport}\n${response.informe}`
+        : response.informe;
+    }
+
+    return updated;
+  }
+
+  findCampoForAiValue(item: any): any {
+    const fields = this.currentNode?.campos || [];
+    const name = this.normalizeText(item.nombre || '');
+    const label = this.normalizeText(item.etiqueta || '');
+
+    return fields.find((campo: any) => this.normalizeText(campo.nombre) === name)
+      || fields.find((campo: any) => this.normalizeText(campo.etiqueta) === label)
+      || fields.find((campo: any) => this.normalizeText(campo.etiqueta).includes(name) && name.length > 2)
+      || null;
+  }
+
+  uploadCampoFile(campo: any, event: Event) {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+
+    campo.uploading = true;
+    this.workflowService.uploadFile(file).subscribe({
+      next: response => {
+        campo.archivoNombre = response.archivoNombre;
+        campo.archivoTipo = response.archivoTipo;
+        campo.archivoUrl = response.archivoUrl;
+        campo.valor = response.archivoNombre;
+        campo.uploading = false;
+      },
+      error: err => {
+        campo.uploading = false;
+        input.value = '';
+        alert(err.error?.error || 'No se pudo subir el archivo.');
+      }
+    });
+  }
+
+  getFileUrl(path: string): string {
+    if (!path) return '';
+    if (path.startsWith('http')) return path;
+    return `http://${window.location.hostname}:8080${path}`;
+  }
+
+  hasPendingUploads(): boolean {
+    return (this.currentNode?.campos || []).some((campo: any) => campo.uploading);
+  }
+
+  missingRequiredFiles(): boolean {
+    return (this.currentNode?.campos || [])
+      .filter((campo: any) => campo.tipo === 'FOTO' || campo.tipo === 'ARCHIVO')
+      .some((campo: any) => !campo.archivoUrl);
+  }
+
+  normalizeText(value: string): string {
+    return String(value || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim();
+  }
+
   completar(outcomeFromBtn?: string) {
+    if (!this.canCurrentUserWorkSelected()) {
+      alert('Esta tarea esta asignada a otro funcionario.');
+      return;
+    }
+
+    if (this.hasPendingUploads()) {
+      alert('Espera a que terminen de subir los archivos.');
+      return;
+    }
+
+    if (this.missingRequiredFiles()) {
+      alert('Debes subir todos los documentos solicitados.');
+      return;
+    }
+
     if (outcomeFromBtn) {
       this.selectedOutcome = outcomeFromBtn;
     }
@@ -731,7 +1672,8 @@ export class MonitorComponent implements OnInit {
       variables: variables,
       nombreNodo: this.currentNode.nombre,
       campos: this.currentNode.campos || [],
-      informeIA: this.iaReport
+      informeIA: this.iaReport,
+      usuario: this.auth.currentUser()?.username || 'Funcionario'
     };
 
     this.workflowService.completarActividad(this.selectedTramite.id, this.currentNode.id, extraData).subscribe({

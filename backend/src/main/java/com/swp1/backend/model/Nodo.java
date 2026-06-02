@@ -16,6 +16,7 @@ public class Nodo {
     private TipoNodo tipo;
     private String nombre;
     private String departamentoId;
+    private List<String> funcionariosAsignados;
     private List<CampoFormulario> campos;
     private double x;
     private double y;
@@ -29,6 +30,8 @@ public class Nodo {
     public void setNombre(String nombre) { this.nombre = nombre; }
     public String getDepartamentoId() { return departamentoId; }
     public void setDepartamentoId(String departamentoId) { this.departamentoId = departamentoId; }
+    public List<String> getFuncionariosAsignados() { return funcionariosAsignados; }
+    public void setFuncionariosAsignados(List<String> funcionariosAsignados) { this.funcionariosAsignados = funcionariosAsignados; }
     public List<CampoFormulario> getCampos() { return campos; }
     public void setCampos(List<CampoFormulario> campos) { this.campos = campos; }
 

@@ -15,7 +15,7 @@ import { Router } from '@angular/router';
         <div>
           <span class="eyebrow">Workspace</span>
           <h1>Automatizaciones SWP1</h1>
-          <p>Hola, {{ auth.currentUser()?.username }}. Controla politicas, tramites y ejecuciones desde una vista operativa.</p>
+          <p>Hola, {{ auth.currentUser()?.username }}. {{ auth.isAdmin() ? 'Controla politicas, tramites y ejecuciones desde una vista operativa.' : 'Estas son las tareas que estan asignadas a tu usuario.' }}</p>
         </div>
 
         <div class="top-actions">
@@ -31,13 +31,13 @@ import { Router } from '@angular/router';
           <small>flujos disponibles</small>
         </article>
         <article class="metric-card">
-          <span class="metric-label">Activos</span>
-          <strong>{{ tramites.length }}</strong>
-          <small>tramites en curso</small>
+          <span class="metric-label">{{ auth.isAdmin() ? 'Activos' : 'Mis tareas' }}</span>
+          <strong>{{ visibleTramites.length }}</strong>
+          <small>{{ auth.isAdmin() ? 'tramites en curso' : 'pendientes asignados' }}</small>
         </article>
         <article class="metric-card">
           <span class="metric-label">Completados</span>
-          <strong>14</strong>
+          <strong>{{ completedCount }}</strong>
           <small>procesos cerrados</small>
         </article>
         <article class="metric-card accent">
@@ -94,22 +94,24 @@ import { Router } from '@angular/router';
           <div class="panel-head compact">
             <div>
               <span class="eyebrow">Ejecuciones</span>
-              <h2>Tramites</h2>
+              <h2>{{ auth.isAdmin() ? 'Tramites' : 'Mis tareas pendientes' }}</h2>
             </div>
+            <button type="button" class="ghost-btn" (click)="abrirMonitor()">Abrir monitor</button>
           </div>
 
           <div class="run-list">
-            <article *ngFor="let t of tramites" class="run-item">
+            <article *ngFor="let t of visibleTramites" class="run-item" (click)="abrirMonitor()">
               <div class="run-dot"></div>
               <div class="run-copy">
                 <strong>{{ t.cliente }}</strong>
                 <span>#{{ t.id }}</span>
+                <em>{{ getCurrentNodeName(t) }} / {{ getAssignmentLabel(t) }}</em>
               </div>
               <span class="status">{{ t.estado }}</span>
             </article>
 
-            <div *ngIf="tramites.length === 0" class="empty-runs">
-              Sin tramites activos.
+            <div *ngIf="visibleTramites.length === 0" class="empty-runs">
+              {{ auth.isAdmin() ? 'Sin tramites activos.' : 'No tienes tareas asignadas ahora.' }}
             </div>
           </div>
         </aside>
@@ -239,6 +241,7 @@ import { Router } from '@angular/router';
     .metric-card.accent {
       border-color: rgba(249, 115, 22, 0.5);
     }
+
 
     .workspace-grid {
       display: grid;
@@ -437,9 +440,17 @@ import { Router } from '@angular/router';
       white-space: nowrap;
     }
 
-    .run-copy span, .empty-runs, .empty-state p {
+    .run-copy span, .run-copy em, .empty-runs, .empty-state p {
       color: #9ca3af;
       font-size: 0.76rem;
+    }
+
+    .run-copy em {
+      color: #fed7aa;
+      font-style: normal;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .status {
@@ -501,6 +512,7 @@ import { Router } from '@angular/router';
       .workspace-grid {
         grid-template-columns: 1fr;
       }
+
     }
 
     @media (max-width: 720px) {
@@ -522,6 +534,7 @@ import { Router } from '@angular/router';
         padding: 18px;
       }
 
+
       .workflow-node::after {
         display: none;
       }
@@ -535,6 +548,19 @@ export class DashboardComponent implements OnInit {
 
   policies: any[] = [];
   tramites: any[] = [];
+
+  get visibleTramites(): any[] {
+    if (this.auth.isAdmin()) {
+      return this.tramites;
+    }
+
+    return this.tramites.filter(t => this.canCurrentUserWorkTramite(t));
+  }
+
+  get completedCount(): number {
+    return this.tramites.filter(t => t.estado === 'FINALIZADO').length;
+  }
+
 
   ngOnInit() {
     this.loadData();
@@ -559,7 +585,55 @@ export class DashboardComponent implements OnInit {
     this.router.navigate(['/designer', policy.id]);
   }
 
+  abrirMonitor() {
+    this.router.navigate(['/monitor']);
+  }
+
   crearPolitica() {
     this.router.navigate(['/designer']);
   }
+
+  getCurrentNodeName(tramite: any): string {
+    const node = this.getCurrentNode(tramite);
+    return node?.nombre || 'Sin etapa asignada';
+  }
+
+  getAssignmentLabel(tramite: any): string {
+    const policy = this.getPolicy(tramite);
+    const node = this.getCurrentNode(tramite);
+    const assignees = this.getAssigneesForNode(node, policy);
+    if (assignees.length === 0) return 'Sin responsable';
+    return assignees.join(', ');
+  }
+
+  canCurrentUserWorkTramite(tramite: any): boolean {
+    if (tramite.estado === 'FINALIZADO') return false;
+
+    const policy = this.getPolicy(tramite);
+    const node = this.getCurrentNode(tramite);
+    if (!node) return false;
+
+    const assignees = this.getAssigneesForNode(node, policy);
+    if (assignees.length === 0) return false;
+
+    return assignees.includes(this.auth.currentUser()?.username || '');
+  }
+
+  private getPolicy(tramite: any): any {
+    return this.policies.find(policy => policy.id === tramite.politicaId);
+  }
+
+  private getCurrentNode(tramite: any): any {
+    const policy = this.getPolicy(tramite);
+    return policy?.nodos?.find((node: any) => node.id === tramite.nodoActualId);
+  }
+
+  private getAssigneesForNode(node: any, policy?: any): string[] {
+    if (!node) return [];
+    if (node.funcionariosAsignados?.length) return node.funcionariosAsignados;
+
+    const dept = policy?.departamentos?.find((item: any) => item.id === node.departamentoId);
+    return dept?.funcionariosAsignados || [];
+  }
+
 }

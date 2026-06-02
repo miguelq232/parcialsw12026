@@ -18,6 +18,7 @@ import { AuthService } from '../../services/auth.service';
         <a routerLink="/dashboard" routerLinkActive="active">Dashboard</a>
         <a *ngIf="auth.isAdmin()" routerLink="/designer" routerLinkActive="active">Disenador</a>
         <a *ngIf="auth.isFuncionario()" routerLink="/monitor" routerLinkActive="active">Monitor</a>
+        <a routerLink="/reportes" routerLinkActive="active">Reportes</a>
       </nav>
 
       <div class="user-profile">

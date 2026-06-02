@@ -7,6 +7,7 @@ export interface Nodo {
   tipo: 'START' | 'ACTIVITY' | 'DECISION' | 'FORK' | 'JOIN' | 'END' | 'INICIO' | 'ACTIVIDAD' | 'FIN';
   nombre: string;
   departamentoId?: string;
+  funcionariosAsignados?: string[];
   campos?: any[];
   status?: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED';
 }
@@ -16,6 +17,15 @@ export interface Conexion {
   origenId: string;
   destinoId: string;
   condicion?: string;
+}
+
+export interface Usuario {
+  id?: string;
+  username: string;
+  email?: string;
+  password?: string;
+  rol: 'ADMIN' | 'FUNCIONARIO' | string;
+  departamentoId?: string;
 }
 
 @Injectable({
@@ -37,6 +47,10 @@ export class WorkflowService {
     return this.http.post<any>(`${this.apiUrl}/politicas`, policy);
   }
 
+  getUsuarios(): Observable<Usuario[]> {
+    return this.http.get<Usuario[]>(`${this.apiUrl}/usuarios`);
+  }
+
   getTramites(): Observable<any[]> {
     return this.http.get<any[]>(`${this.apiUrl}/tramites`);
   }
@@ -49,7 +63,21 @@ export class WorkflowService {
     return this.http.post<any>(`${this.apiUrl}/tramites/${tramiteId}/completar`, { nodoId, datos });
   }
 
+  uploadFile(file: File): Observable<any> {
+    const formData = new FormData();
+    formData.append('file', file);
+    return this.http.post<any>(`${this.apiUrl}/files/upload`, formData);
+  }
+
   sendAiCommand(prompt: string, currentState: any): Observable<any> {
     return this.http.post<any>(`${this.apiUrl}/ai/command`, { prompt, currentState });
+  }
+
+  sendFormFillCommand(transcript: string, formContext: any): Observable<any> {
+    return this.http.post<any>(`${this.apiUrl}/ai/form-fill`, { transcript, formContext });
+  }
+
+  getTramitePrediction(tramiteId: string): Observable<any> {
+    return this.http.get<any>(`${this.apiUrl}/ai/tramites/${tramiteId}/prediction`);
   }
 }

@@ -90,12 +90,13 @@ public class TramiteController {
             String nodoId = (String) payload.get("nodoId");
             String nombreNodo = (String) extraData.get("nombreNodo");
             String informeIA = (String) extraData.get("informeIA");
+            String usuario = (String) extraData.getOrDefault("usuario", "Funcionario");
             List<Map<String, Object>> camposMap = (List<Map<String, Object>>) extraData.get("campos");
             
             LogActividad log = new LogActividad();
             log.setNodoId(nodoId);
             log.setNombreNodo(nombreNodo);
-            log.setUsuario("Funcionario");
+            log.setUsuario(usuario);
             LocalDateTime now = LocalDateTime.now();
             log.setFechaCompletado(now);
             log.setInformeIA(informeIA);
@@ -118,6 +119,9 @@ public class TramiteController {
                     cf.setTipo((String) cmap.get("tipo"));
                     Object valorObj = cmap.get("valor");
                     cf.setValor(valorObj != null ? String.valueOf(valorObj) : "");
+                    cf.setArchivoNombre((String) cmap.get("archivoNombre"));
+                    cf.setArchivoTipo((String) cmap.get("archivoTipo"));
+                    cf.setArchivoUrl((String) cmap.get("archivoUrl"));
                     campos.add(cf);
                 }
             }
