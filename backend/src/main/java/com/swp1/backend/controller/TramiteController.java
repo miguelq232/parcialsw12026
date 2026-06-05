@@ -14,6 +14,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
+import java.util.Objects;
 
 @RestController
 @RequestMapping("/api/tramites")
@@ -35,6 +36,10 @@ public class TramiteController {
         for (Tramite tramite : tramites) {
             if (isBlank(tramite.getNumeroTramite())) {
                 tramite.setNumeroTramite(generateTramiteNumber());
+                tramiteRepository.save(tramite);
+            }
+            PoliticaDeNegocio politica = politicaRepository.findById(tramite.getPoliticaId()).orElse(null);
+            if (repairStateFromHistory(tramite, politica)) {
                 tramiteRepository.save(tramite);
             }
         }
@@ -79,6 +84,9 @@ public class TramiteController {
             String nodoInicial = workflowEngineService.getNodoActual(tramite.getId());
             tramite.setNodoActualId(nodoInicial);
             return org.springframework.http.ResponseEntity.ok(tramiteRepository.save(tramite));
+        } catch (IllegalStateException ise) {
+            return org.springframework.http.ResponseEntity.status(400)
+                    .body(java.util.Map.of("error", ise.getMessage()));
         } catch (Exception e) {
             e.printStackTrace();
             return org.springframework.http.ResponseEntity.status(500)
@@ -88,20 +96,52 @@ public class TramiteController {
 
     @PostMapping("/{id}/completar")
     public org.springframework.http.ResponseEntity<?> completar(@PathVariable String id, @RequestBody Map<String, Object> payload) {
-        Map<String, Object> variables = null;
+        Map<String, Object> variables = new HashMap<>();
+        String nodoId = null;
         try {
             Tramite tramite = tramiteRepository.findById(id).orElseThrow();
+            PoliticaDeNegocio politica = politicaRepository.findById(tramite.getPoliticaId()).orElse(null);
+            if (repairStateFromHistory(tramite, politica)) {
+                tramite = tramiteRepository.save(tramite);
+            }
+
+            if ("FINALIZADO".equals(tramite.getEstado())) {
+                return org.springframework.http.ResponseEntity.status(400)
+                        .body(java.util.Map.of("error", "Este tramite ya esta finalizado y no tiene una tarea activa."));
+            }
             
             Map<String, Object> extraData = (Map<String, Object>) payload.get("datos");
             variables = (Map<String, Object>) extraData.get("variables");
-            String nodoId = (String) payload.get("nodoId");
+            if (variables == null) {
+                variables = new HashMap<>();
+            }
+            nodoId = (String) payload.get("nodoId");
             String nombreNodo = (String) extraData.get("nombreNodo");
             System.out.println("DEBUG VARIABLES RECIBIDAS: " + variables);
-            workflowEngineService.completarTarea(id, variables);
+            String nodoActivo = workflowEngineService.getNodoActivo(id);
+            if (nodoActivo == null && politica != null) {
+                workflowEngineService.sincronizarConHistorial(politica, tramite);
+                nodoActivo = workflowEngineService.getNodoActivo(id);
+            }
+
+            if (nodoActivo == null) {
+                return org.springframework.http.ResponseEntity.status(400)
+                        .body(java.util.Map.of("error", "No hay una tarea activa para este tramite. Vuelve a abrir el seguimiento para refrescar el estado."));
+            }
+
+            if (nodoId != null && !nodoId.equals(nodoActivo)) {
+                return org.springframework.http.ResponseEntity.status(400)
+                        .body(java.util.Map.of("error", "El tramite esta actualmente en '" + nodoActivo + "', no en '" + nodoId + "'. Refresca la pantalla antes de completar."));
+            }
+
+            workflowEngineService.completarTarea(id, nodoId, variables);
         } catch (org.flowable.common.engine.api.FlowableException fe) {
             fe.printStackTrace();
             return org.springframework.http.ResponseEntity.status(400)
                 .body(java.util.Map.of("error", "Error del motor de flujos: No se encontró un camino válido para la decisión '" + variables.get("outcome") + "'. Asegúrate de que las conexiones tengan exactamente ese texto en el lienzo o inicia un nuevo trámite."));
+        } catch (IllegalStateException ise) {
+            return org.springframework.http.ResponseEntity.status(400)
+                    .body(java.util.Map.of("error", ise.getMessage()));
         } catch (Exception e) {
             e.printStackTrace();
             return org.springframework.http.ResponseEntity.status(500)
@@ -165,6 +205,8 @@ public class TramiteController {
             
             if ("FIN".equals(siguienteNodo)) {
                 tramite.setEstado("FINALIZADO");
+            } else {
+                tramite.setEstado("EN_PROCESO");
             }
 
             return org.springframework.http.ResponseEntity.ok(tramiteRepository.save(tramite));
@@ -312,6 +354,132 @@ public class TramiteController {
         field.setTipo(tipo);
         field.setValor(valor);
         return field;
+    }
+
+    private boolean repairStateFromHistory(Tramite tramite, PoliticaDeNegocio politica) {
+        Nodo expectedNode = resolveCurrentNodeFromHistory(tramite, politica);
+        if (expectedNode == null) {
+            return false;
+        }
+
+        String expectedNodeId = isEndNode(expectedNode) ? "FIN" : expectedNode.getId();
+        String expectedEstado = isEndNode(expectedNode) ? "FINALIZADO" : "EN_PROCESO";
+
+        boolean changed = !Objects.equals(tramite.getNodoActualId(), expectedNodeId)
+                || !Objects.equals(tramite.getEstado(), expectedEstado);
+
+        if (changed) {
+            tramite.setNodoActualId(expectedNodeId);
+            tramite.setEstado(expectedEstado);
+        }
+
+        return changed;
+    }
+
+    private Nodo resolveCurrentNodeFromHistory(Tramite tramite, PoliticaDeNegocio politica) {
+        if (tramite == null || politica == null || politica.getNodos() == null || politica.getConexiones() == null) {
+            return null;
+        }
+
+        List<LogActividad> historial = tramite.getHistorial() != null
+                ? new java.util.ArrayList<>(tramite.getHistorial())
+                : new java.util.ArrayList<>();
+
+        historial.sort(java.util.Comparator.comparing(
+                LogActividad::getFechaCompletado,
+                java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder())
+        ));
+
+        LogActividad lastActivityLog = null;
+        int lastActivityIndex = -1;
+        for (int i = 0; i < historial.size(); i++) {
+            LogActividad log = historial.get(i);
+            Nodo node = findNode(politica, log.getNodoId());
+            if (node != null && isActivityNode(node)) {
+                lastActivityLog = log;
+                lastActivityIndex = i;
+            }
+        }
+
+        if (lastActivityLog == null) {
+            Nodo start = findStartNode(politica);
+            return start != null ? resolveNextNodeAfterCompletion(politica, start.getId(), Map.of()) : null;
+        }
+
+        Map<String, Object> variables = variablesFromLog(lastActivityLog);
+        String decisionOutcome = findDecisionOutcome(historial, lastActivityIndex);
+        if (decisionOutcome != null && !decisionOutcome.isBlank()) {
+            variables.put("outcome", decisionOutcome);
+        }
+
+        return resolveNextNodeAfterCompletion(politica, lastActivityLog.getNodoId(), variables);
+    }
+
+    private Nodo resolveNextNodeAfterCompletion(
+            PoliticaDeNegocio politica,
+            String completedNodeId,
+            Map<String, Object> variables
+    ) {
+        Conexion firstConnection = findFirstConnectionFrom(politica, completedNodeId);
+        if (firstConnection == null) {
+            return null;
+        }
+
+        Nodo firstTarget = findNode(politica, firstConnection.getDestinoId());
+        if (firstTarget != null && firstTarget.getTipo() == Nodo.TipoNodo.DECISION) {
+            String outcome = variables != null && variables.get("outcome") != null
+                    ? variables.get("outcome").toString()
+                    : "";
+            Conexion selected = findDecisionConnection(politica, firstTarget.getId(), outcome);
+            return selected != null ? findNode(politica, selected.getDestinoId()) : firstTarget;
+        }
+
+        return firstTarget;
+    }
+
+    private boolean isActivityNode(Nodo node) {
+        return node != null && (node.getTipo() == Nodo.TipoNodo.ACTIVIDAD || node.getTipo() == Nodo.TipoNodo.ACTIVITY);
+    }
+
+    private Map<String, Object> variablesFromLog(LogActividad log) {
+        Map<String, Object> variables = new HashMap<>();
+        if (log == null || log.getDatosFormulario() == null) {
+            return variables;
+        }
+
+        for (CampoFormulario campo : log.getDatosFormulario()) {
+            if (campo == null || campo.getNombre() == null || campo.getNombre().isBlank()) {
+                continue;
+            }
+
+            String value = campo.getValor() != null ? campo.getValor() : "";
+            variables.put(campo.getNombre(), value);
+            if ("outcome".equalsIgnoreCase(campo.getNombre()) || "resultado".equalsIgnoreCase(campo.getNombre())) {
+                variables.put("outcome", value);
+            }
+        }
+
+        return variables;
+    }
+
+    private String findDecisionOutcome(List<LogActividad> historial, int currentIndex) {
+        for (int i = currentIndex + 1; i < historial.size(); i++) {
+            LogActividad log = historial.get(i);
+            if (log.getDatosFormulario() == null) {
+                continue;
+            }
+
+            for (CampoFormulario campo : log.getDatosFormulario()) {
+                if (campo == null || campo.getValor() == null) {
+                    continue;
+                }
+                if ("outcome".equalsIgnoreCase(campo.getNombre()) || "Resultado".equalsIgnoreCase(campo.getEtiqueta())) {
+                    return campo.getValor();
+                }
+            }
+        }
+
+        return null;
     }
 
     private String generateTramiteNumber() {
