@@ -152,7 +152,7 @@ public class TramiteController {
             Tramite tramite = tramiteRepository.findById(id).orElseThrow();
             
             Map<String, Object> extraData = (Map<String, Object>) payload.get("datos");
-            String nodoId = (String) payload.get("nodoId");
+            nodoId = (String) payload.get("nodoId");
             String nombreNodo = (String) extraData.get("nombreNodo");
             String informeIA = (String) extraData.get("informeIA");
             String usuario = (String) extraData.getOrDefault("usuario", "Funcionario");
