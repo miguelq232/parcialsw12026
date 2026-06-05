@@ -8,4 +8,5 @@ import java.util.List;
 @Repository
 public interface TramiteRepository extends MongoRepository<Tramite, String> {
     List<Tramite> findByNodoActualIdIn(List<String> nodoIds);
+    boolean existsByNumeroTramite(String numeroTramite);
 }

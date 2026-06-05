@@ -104,7 +104,7 @@ import { Router } from '@angular/router';
               <div class="run-dot"></div>
               <div class="run-copy">
                 <strong>{{ t.cliente }}</strong>
-                <span>#{{ t.id }}</span>
+                <span>#{{ getTramiteNumber(t) }}</span>
                 <em>{{ getCurrentNodeName(t) }} / {{ getAssignmentLabel(t) }}</em>
               </div>
               <span class="status">{{ t.estado }}</span>
@@ -590,6 +590,12 @@ export class DashboardComponent implements OnInit {
     return this.tramites.filter(t => t.estado === 'FINALIZADO').length;
   }
 
+  getTramiteNumber(tramite: any): string {
+    if (!tramite) return '';
+    if (tramite.numeroTramite) return tramite.numeroTramite;
+    if (tramite.id) return String(tramite.id).substring(0, 8).toUpperCase();
+    return 'SIN-NUMERO';
+  }
 
   ngOnInit() {
     this.loadData();

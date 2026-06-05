@@ -604,6 +604,7 @@ public class DataInitializer {
     ) {
         Tramite tramite = new Tramite();
         tramite.setId(id);
+        tramite.setNumeroTramite(demoNumeroTramite(id));
         tramite.setPoliticaId(politicaId);
         tramite.setCliente(cliente);
         tramite.setEstado("EN_PROCESO");
@@ -634,6 +635,31 @@ public class DataInitializer {
 
         workflowEngineService.cancelarTramitesActivos(id);
         return true;
+    }
+
+    private String demoNumeroTramite(String id) {
+        if ("demo-tramite-prestamo-nuevo".equals(id)) return "TR-2026-000001";
+        if ("demo-tramite-prestamo-evaluacion".equals(id)) return "TR-2026-000002";
+        if ("demo-tramite-prestamo-aprobacion".equals(id)) return "TR-2026-000003";
+        if ("demo-tramite-prestamo-finalizado".equals(id)) return "TR-2026-000004";
+        if ("demo-tramite-reclamo-nuevo".equals(id)) return "TR-2026-000005";
+        if ("demo-tramite-reclamo-finalizado".equals(id)) return "TR-2026-000006";
+        if ("demo-tramite-licencia-nuevo".equals(id)) return "TR-2026-000007";
+
+        int index = parseDemoIndex(id);
+        if (id.startsWith("demo-bulk-prestamo-")) return String.format("TR-2026-%06d", 1000 + index);
+        if (id.startsWith("demo-bulk-reclamo-")) return String.format("TR-2026-%06d", 2000 + index);
+        if (id.startsWith("demo-bulk-licencia-")) return String.format("TR-2026-%06d", 3000 + index);
+
+        return "TR-DEMO-" + Math.abs(id.hashCode());
+    }
+
+    private int parseDemoIndex(String id) {
+        try {
+            return Integer.parseInt(id.substring(id.lastIndexOf('-') + 1));
+        } catch (Exception e) {
+            return 0;
+        }
     }
 
     private LogActividad buildInicioLog(String politicaId, LocalDateTime fechaInicio) {

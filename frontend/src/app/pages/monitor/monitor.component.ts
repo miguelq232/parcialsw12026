@@ -22,6 +22,18 @@ function getSpeechRecognitionCtor(): any {
         <p>Listado de procesos en ejecución</p>
       </header>
 
+      <section class="search-panel">
+        <label for="tramite-search">Buscar tramite</label>
+        <input
+          id="tramite-search"
+          type="search"
+          [(ngModel)]="searchTerm"
+          placeholder="Numero de tramite, ID, cliente o funcionario"
+          class="search-input"
+        >
+        <span>{{ filteredVisibleTramites.length }} resultado(s)</span>
+      </section>
+
       <div class="layout">
         <!-- Kanban Board (Sistema de Calles) -->
         <div class="list-panel kanban-board" style="display: flex; gap: 16px; width: 100%; overflow-x: auto; padding-bottom: 16px;">
@@ -44,7 +56,7 @@ function getSpeechRecognitionCtor(): any {
                    style="background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); display: flex; flex-direction: column; gap: 6px;">
                 
                 <div style="display: flex; justify-content: space-between; align-items: center;">
-                  <span class="id-text" style="font-family: monospace; font-size: 0.75rem; font-weight: 700; color: var(--primary);">#{{ t.id.substring(0,6) }}</span>
+                  <span class="id-text" style="font-family: monospace; font-size: 0.75rem; font-weight: 700; color: var(--primary);">#{{ getTramiteNumber(t) }}</span>
                   <span style="font-size: 0.65rem; color: #64748b; font-weight: 600; background: #f1f5f9; padding: 2px 6px; border-radius: 4px;">{{ getTiempoTotalTramite(t) }}</span>
                 </div>
                 
@@ -66,7 +78,7 @@ function getSpeechRecognitionCtor(): any {
           <header class="modal-header">
             <div>
               <h3 style="margin: 0; font-size: 1.25rem;">Trámite de {{ selectedTramite?.cliente }}</h3>
-              <p style="margin: 4px 0 0 0; font-size: 0.813rem; color: var(--text-muted);">ID: #{{ selectedTramite?.id }}</p>
+              <p style="margin: 4px 0 0 0; font-size: 0.813rem; color: var(--text-muted);">Numero: #{{ getTramiteNumber(selectedTramite) }} / ID: #{{ selectedTramite?.id }}</p>
             </div>
             <button class="close-btn" (click)="closeModal()">×</button>
           </header>
@@ -266,6 +278,10 @@ function getSpeechRecognitionCtor(): any {
                     <h4 style="margin: 0; font-size: 0.875rem; color: #1e293b;">{{ log.nombreNodo }}</h4>
                     <span style="font-size: 0.75rem; color: #64748b;">{{ log.fechaCompletado | date:'dd/MM HH:mm' }}</span>
                   </div>
+                  <div class="history-meta">
+                    <span>Funcionario: {{ log.usuario || 'Sin funcionario' }}</span>
+                    <span>Tiempo: {{ formatDuration(log.duracionSegundos) }}</span>
+                  </div>
                   <div *ngIf="log.datosFormulario?.length" class="history-fields">
                     <div *ngFor="let c of log.datosFormulario" class="history-field" [class.with-preview]="c.archivoUrl">
                       <span class="history-field-label">{{ c.etiqueta }}:</span>
@@ -306,6 +322,40 @@ function getSpeechRecognitionCtor(): any {
     .monitor-container { padding: 32px; height: 100%; display: flex; flex-direction: column; gap: 24px; }
     .page-header h1 { font-size: 1.5rem; }
     .page-header p { color: var(--text-muted); font-size: 0.875rem; }
+    .search-panel {
+      display: grid;
+      grid-template-columns: auto minmax(220px, 420px) auto;
+      gap: 10px;
+      align-items: center;
+      padding: 12px 14px;
+      border: 1px solid #2b2b31;
+      border-radius: 8px;
+      background: rgba(23, 23, 26, 0.94);
+    }
+    .search-panel label {
+      color: #f9fafb;
+      font-size: 0.82rem;
+      font-weight: 700;
+    }
+    .search-input {
+      width: 100%;
+      min-height: 38px;
+      border: 1px solid #3f4652;
+      border-radius: 6px;
+      background: #111113;
+      color: #f9fafb;
+      padding: 0 10px;
+      outline: none;
+    }
+    .search-input:focus {
+      border-color: #f97316;
+      box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.16);
+    }
+    .search-panel span {
+      color: #9ca3af;
+      font-size: 0.78rem;
+      white-space: nowrap;
+    }
     .layout { display: flex; gap: 24px; flex: 1; overflow: hidden; }
     .list-panel { flex: 1; overflow-y: auto; }
     .form-panel { width: 400px; display: flex; flex-direction: column; flex-shrink: 0; }
@@ -370,6 +420,21 @@ function getSpeechRecognitionCtor(): any {
       border-radius: 6px;
       border: 1px solid #e2e8f0;
       min-width: 0;
+    }
+    .history-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 8px;
+      color: #64748b;
+      font-size: 0.74rem;
+      font-weight: 700;
+    }
+    .history-meta span {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 4px;
+      padding: 3px 6px;
     }
     .history-field.with-preview {
       grid-column: span 2;
@@ -770,9 +835,19 @@ function getSpeechRecognitionCtor(): any {
       border-color: #33343a !important;
     }
 
+    .history-meta span {
+      background: #18191d !important;
+      border-color: #33343a !important;
+      color: #cbd5e1 !important;
+    }
+
     @media (max-width: 900px) {
       .monitor-container {
         padding: 16px !important;
+      }
+
+      .search-panel {
+        grid-template-columns: 1fr !important;
       }
 
       .modal-body-scroll {
@@ -788,6 +863,7 @@ export class MonitorComponent implements OnInit, OnDestroy {
   private sanitizer = inject(DomSanitizer);
   public auth = inject(AuthService);
   tramites: any[] = [];
+  searchTerm = '';
   selectedTramite: any = null;
   selectedPolicy: any = null;
   currentNode: any = null;
@@ -849,7 +925,11 @@ export class MonitorComponent implements OnInit, OnDestroy {
   }
 
   getTramitesByLane(lane: string): any[] {
-    return this.tramites.filter(t => this.getTramiteLane(t) === lane && this.canCurrentUserSeeTramite(t));
+    return this.filteredVisibleTramites.filter(t => this.getTramiteLane(t) === lane);
+  }
+
+  get filteredVisibleTramites(): any[] {
+    return this.tramites.filter(t => this.canCurrentUserSeeTramite(t) && this.matchesSearch(t));
   }
 
   loadTramites() {
@@ -998,6 +1078,54 @@ export class MonitorComponent implements OnInit, OnDestroy {
 
     const dept = policy?.departamentos?.find((d: any) => d.id === node.departamentoId);
     return dept?.funcionariosAsignados || [];
+  }
+
+  getTramiteNumber(tramite: any): string {
+    if (!tramite) return '';
+    if (tramite.numeroTramite) return tramite.numeroTramite;
+    if (tramite.id) return String(tramite.id).substring(0, 8).toUpperCase();
+    return 'SIN-NUMERO';
+  }
+
+  matchesSearch(tramite: any): boolean {
+    const query = this.normalizeText(this.searchTerm);
+    if (!query) return true;
+
+    const policy = this.policies.find(p => p.id === tramite.politicaId);
+    const currentNode = policy?.nodos?.find((node: any) => node.id === tramite.nodoActualId);
+    const historyText = (tramite.historial || [])
+      .map((log: any) => [
+        log.nombreNodo,
+        log.usuario,
+        log.informeIA,
+        ...(log.datosFormulario || []).map((field: any) => `${field.etiqueta || ''} ${field.valor || ''} ${field.archivoNombre || ''}`)
+      ].join(' '))
+      .join(' ');
+
+    const searchable = [
+      this.getTramiteNumber(tramite),
+      tramite.id,
+      tramite.cliente,
+      tramite.estado,
+      policy?.nombre,
+      currentNode?.nombre,
+      this.getDeptoName(currentNode?.departamentoId, policy),
+      this.getAssignmentLabel(currentNode, policy),
+      historyText
+    ].join(' ');
+
+    return this.normalizeText(searchable).includes(query);
+  }
+
+  formatDuration(seconds: any): string {
+    const value = Number(seconds);
+    if (!Number.isFinite(value) || value < 0) return 'N/A';
+    if (value < 60) return `${Math.floor(value)} seg`;
+    const minutes = Math.floor(value / 60);
+    if (minutes < 60) return `${minutes} min`;
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    return remainingMinutes ? `${hours} h ${remainingMinutes} m` : `${hours} h`;
   }
 
   isNodeCompleted(nodeId: string): boolean {

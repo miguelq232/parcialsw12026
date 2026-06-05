@@ -31,7 +31,14 @@ public class TramiteController {
 
     @GetMapping
     public List<Tramite> getAll() {
-        return tramiteRepository.findAll();
+        List<Tramite> tramites = tramiteRepository.findAll();
+        for (Tramite tramite : tramites) {
+            if (isBlank(tramite.getNumeroTramite())) {
+                tramite.setNumeroTramite(generateTramiteNumber());
+                tramiteRepository.save(tramite);
+            }
+        }
+        return tramites;
     }
 
     @PostMapping("/iniciar")
@@ -46,6 +53,7 @@ public class TramiteController {
             }
 
             Tramite tramite = new Tramite();
+            tramite.setNumeroTramite(generateTramiteNumber());
             tramite.setPoliticaId(politicaId);
             tramite.setCliente(cliente);
             tramite.setEstado("EN_PROCESO");
@@ -304,5 +312,19 @@ public class TramiteController {
         field.setTipo(tipo);
         field.setValor(valor);
         return field;
+    }
+
+    private String generateTramiteNumber() {
+        int year = LocalDateTime.now().getYear();
+        long sequence = tramiteRepository.count() + 1;
+        String candidate;
+        do {
+            candidate = String.format("TR-%d-%06d", year, sequence++);
+        } while (tramiteRepository.existsByNumeroTramite(candidate));
+        return candidate;
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
     }
 }

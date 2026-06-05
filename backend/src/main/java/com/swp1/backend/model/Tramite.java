@@ -9,6 +9,7 @@ import java.util.List;
 public class Tramite {
     @Id
     private String id;
+    private String numeroTramite;
     private String politicaId;
     private String nodoActualId;
     private String estado; // PENDIENTE, EN_PROCESO, FINALIZADO
@@ -19,6 +20,8 @@ public class Tramite {
     // Getters and Setters
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
+    public String getNumeroTramite() { return numeroTramite; }
+    public void setNumeroTramite(String numeroTramite) { this.numeroTramite = numeroTramite; }
     public String getPoliticaId() { return politicaId; }
     public void setPoliticaId(String politicaId) { this.politicaId = politicaId; }
     public String getNodoActualId() { return nodoActualId; }
