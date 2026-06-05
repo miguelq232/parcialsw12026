@@ -26,7 +26,7 @@ services:
       - APP_UPLOAD_DIR=/app/uploads
       - DEMO_RESET_TRAMITES_ENABLED=${DEMO_RESET_TRAMITES_ENABLED:-true}
       - DEMO_BULK_TRAMITES_ENABLED=${DEMO_BULK_TRAMITES_ENABLED:-true}
-      - DEMO_BULK_TRAMITES_COUNT=${DEMO_BULK_TRAMITES_COUNT:-45}
+      - DEMO_BULK_TRAMITES_COUNT=${DEMO_BULK_TRAMITES_COUNT:-240}
     volumes:
       - backend_data:/app/data
       - backend_uploads:/app/uploads

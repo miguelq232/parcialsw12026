@@ -759,6 +759,11 @@ export class ReportsComponent implements OnInit, OnDestroy {
       const policyName = policy?.nombre || tramite.politicaId || 'Sin politica';
 
       (tramite.historial || []).forEach((log: any) => {
+        const node = this.getNodeById(policy, log.nodoId);
+        if (!this.isReportableCompletedLog(log, node)) {
+          return;
+        }
+
         const date = log.fechaCompletado ? new Date(log.fechaCompletado) : null;
         rows.push({
           funcionario: log.usuario || 'Sin funcionario',
@@ -780,7 +785,12 @@ export class ReportsComponent implements OnInit, OnDestroy {
       if (tramite.estado !== 'FINALIZADO') {
         const node = this.getCurrentNode(tramite);
         const assignees = this.getAssigneesForNode(node, policy);
-        assignees.forEach(username => {
+        const pendingAssignees = assignees.length ? assignees : ['Sin funcionario'];
+        const pendingSince = this.getPendingSinceDate(tramite);
+        const pendingSeconds = pendingSince
+          ? Math.max(0, Math.floor((Date.now() - pendingSince.getTime()) / 1000))
+          : 0;
+        pendingAssignees.forEach(username => {
           rows.push({
             funcionario: username,
             tipo: 'Pendiente actual',
@@ -789,10 +799,10 @@ export class ReportsComponent implements OnInit, OnDestroy {
             politica: policyName,
             etapa: node?.nombre || 'Sin etapa',
             estadoTramite: tramite.estado,
-            fecha: null,
-            fechaTexto: '',
-            duracionSegundos: 0,
-            duracion: '',
+            fecha: pendingSince,
+            fechaTexto: pendingSince ? this.formatDateTime(pendingSince) : '',
+            duracionSegundos: pendingSeconds,
+            duracion: pendingSeconds ? this.formatDuration(pendingSeconds) : '',
             datos: '',
             informe: ''
           });
@@ -1296,6 +1306,30 @@ export class ReportsComponent implements OnInit, OnDestroy {
   private getCurrentNode(tramite: any): any {
     const policy = this.getPolicy(tramite);
     return policy?.nodos?.find((node: any) => node.id === tramite.nodoActualId);
+  }
+
+  private getNodeById(policy: any, nodeId: string): any {
+    return policy?.nodos?.find((node: any) => node.id === nodeId);
+  }
+
+  private isReportableCompletedLog(log: any, node: any): boolean {
+    const type = String(node?.tipo || '').toUpperCase();
+    if (['INICIO', 'START', 'DECISION', 'FIN', 'END'].includes(type)) {
+      return false;
+    }
+
+    if (type === 'ACTIVIDAD' || type === 'ACTIVITY') {
+      return true;
+    }
+
+    return Boolean((log.datosFormulario || []).length || Number(log.duracionSegundos || 0) > 0);
+  }
+
+  private getPendingSinceDate(tramite: any): Date | null {
+    const historial = tramite.historial || [];
+    const lastLog = historial.length ? historial[historial.length - 1] : null;
+    const value = lastLog?.fechaCompletado || tramite.fechaInicio;
+    return value ? new Date(value) : null;
   }
 
   private getAssigneesForNode(node: any, policy?: any): string[] {

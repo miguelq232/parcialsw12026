@@ -1,6 +1,7 @@
 package com.swp1.backend.controller;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -69,8 +70,14 @@ public class FileController {
         }
 
         org.springframework.core.io.Resource resource = new org.springframework.core.io.UrlResource(file.toUri());
+        String contentType = Files.probeContentType(file);
+        MediaType mediaType = contentType != null
+                ? MediaType.parseMediaType(contentType)
+                : MediaType.APPLICATION_OCTET_STREAM;
+
         return ResponseEntity.ok()
-                .header("Content-Disposition", "attachment; filename=\"" + file.getFileName() + "\"")
+                .contentType(mediaType)
+                .header("Content-Disposition", "inline; filename=\"" + file.getFileName() + "\"")
                 .body(resource);
     }
 }

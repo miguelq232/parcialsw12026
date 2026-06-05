@@ -3,12 +3,14 @@ package com.swp1.backend.config;
 import com.swp1.backend.model.CampoFormulario;
 import com.swp1.backend.model.Conexion;
 import com.swp1.backend.model.Departamento;
+import com.swp1.backend.model.Formulario;
 import com.swp1.backend.model.LogActividad;
 import com.swp1.backend.model.Nodo;
 import com.swp1.backend.model.PoliticaDeNegocio;
 import com.swp1.backend.model.Tramite;
 import com.swp1.backend.model.Usuario;
 import com.swp1.backend.repository.DepartamentoRepository;
+import com.swp1.backend.repository.FormularioRepository;
 import com.swp1.backend.repository.PoliticaRepository;
 import com.swp1.backend.repository.TramiteRepository;
 import com.swp1.backend.repository.UsuarioRepository;
@@ -31,7 +33,7 @@ public class DataInitializer {
     @Value("${app.demo.bulk-tramites.enabled:true}")
     private boolean bulkDemoTramitesEnabled;
 
-    @Value("${app.demo.bulk-tramites.count:45}")
+    @Value("${app.demo.bulk-tramites.count:240}")
     private int bulkDemoTramitesCount;
 
     @Value("${app.demo.reset-tramites.enabled:true}")
@@ -42,6 +44,7 @@ public class DataInitializer {
             DepartamentoRepository departamentoRepository,
             UsuarioRepository usuarioRepository,
             PoliticaRepository politicaRepository,
+            FormularioRepository formularioRepository,
             TramiteRepository tramiteRepository,
             WorkflowEngineService workflowEngineService
     ) {
@@ -49,16 +52,17 @@ public class DataInitializer {
             seedDepartamentos(departamentoRepository);
             seedUsuarios(usuarioRepository);
             seedDemoData(politicaRepository, tramiteRepository, workflowEngineService);
+            seedFormulariosFromTramites(formularioRepository, tramiteRepository);
         };
     }
 
     private void seedDepartamentos(DepartamentoRepository repository) {
-        if (repository.count() > 0) return;
-
-        repository.save(departamento("Atencion al Cliente", "Recepcion, validacion inicial y contacto con clientes."));
-        repository.save(departamento("Riesgos Crediticios", "Revision financiera, score y evaluacion de riesgo."));
-        repository.save(departamento("Direccion General", "Aprobaciones finales y decisiones excepcionales."));
-        repository.save(departamento("Revision Tecnica", "Inspecciones, peritajes y validaciones operativas."));
+        removeLegacyDemoDepartamentos(repository);
+        ensureDepartamento(repository, "d-atencion", "Atencion al Cliente", "Recepcion, validacion inicial y contacto con clientes.");
+        ensureDepartamento(repository, "d-riesgos", "Riesgos Crediticios", "Revision financiera, score y evaluacion de riesgo.");
+        ensureDepartamento(repository, "d-aprobacion", "Direccion General", "Aprobaciones finales y decisiones excepcionales.");
+        ensureDepartamento(repository, "d-tecnico", "Revision Tecnica", "Inspecciones, peritajes y validaciones operativas.");
+        ensureDepartamento(repository, "d-caja", "Caja", "Validacion de pagos, comprobantes y entrega de documentos.");
     }
 
     private void seedUsuarios(UsuarioRepository repository) {
@@ -69,6 +73,45 @@ public class DataInitializer {
         ensureUsuario(repository, "Funcionario 3", "funcionario3@swp1.demo", "funcionario123", "FUNCIONARIO", "d-aprobacion");
         ensureUsuario(repository, "Funcionario Tecnico", "tecnico@swp1.demo", "funcionario123", "FUNCIONARIO", "d-tecnico");
         ensureUsuario(repository, "Funcionario Caja", "caja@swp1.demo", "funcionario123", "FUNCIONARIO", "d-caja");
+    }
+
+    private void seedFormulariosFromTramites(FormularioRepository formularioRepository, TramiteRepository tramiteRepository) {
+        if (resetDemoTramitesEnabled) {
+            formularioRepository.findAll().stream()
+                    .filter(formulario -> formulario.getId() != null && formulario.getId().startsWith("demo-form-"))
+                    .forEach(formulario -> formularioRepository.deleteById(formulario.getId()));
+        }
+
+        for (Tramite tramite : tramiteRepository.findAll()) {
+            if (tramite.getId() == null || !tramite.getId().startsWith("demo-") || tramite.getHistorial() == null) {
+                continue;
+            }
+
+            int index = 1;
+            for (LogActividad log : tramite.getHistorial()) {
+                if (log.getDatosFormulario() == null || log.getDatosFormulario().isEmpty()) {
+                    index++;
+                    continue;
+                }
+
+                String id = "demo-form-" + tramite.getId() + "-" + String.format("%02d", index);
+                if (!resetDemoTramitesEnabled && formularioRepository.existsById(id)) {
+                    index++;
+                    continue;
+                }
+
+                Formulario formulario = new Formulario();
+                formulario.setId(id);
+                formulario.setTramiteId(tramite.getId());
+                formulario.setNodoId(log.getNodoId());
+                formulario.setUsuarioId(log.getUsuario());
+                formulario.setTiempoAtencion(log.getDuracionSegundos() != null ? log.getDuracionSegundos() : 0L);
+                formulario.setFechaCreacion(log.getFechaCompletado());
+                formulario.setContenido(formularioContenido(tramite, log));
+                formularioRepository.save(formulario);
+                index++;
+            }
+        }
     }
 
     private void seedDemoData(
@@ -308,13 +351,14 @@ public class DataInitializer {
         for (int index = 1; index <= count; index++) {
             try {
                 int tipo = (index - 1) % 3;
-                int avance = (index - 1) % 5;
+                int scenario = (index - 1) % 8;
+                int avance = avanceDemo(index, scenario);
                 if (tipo == 0) {
-                    seedBulkPrestamo(repository, workflowEngineService, index, avance);
+                    seedBulkPrestamo(repository, workflowEngineService, index, avance, scenario);
                 } else if (tipo == 1) {
-                    seedBulkReclamo(repository, workflowEngineService, index, avance);
+                    seedBulkReclamo(repository, workflowEngineService, index, avance, scenario);
                 } else {
-                    seedBulkLicencia(repository, workflowEngineService, index, avance);
+                    seedBulkLicencia(repository, workflowEngineService, index, avance, scenario);
                 }
             } catch (Exception e) {
                 System.err.println("No se pudo crear tramite demo masivo #" + index + ": " + e.getMessage());
@@ -326,13 +370,14 @@ public class DataInitializer {
             TramiteRepository repository,
             WorkflowEngineService workflowEngineService,
             int index,
-            int avance
+            int avance,
+            int scenario
     ) {
         String id = "demo-bulk-prestamo-" + String.format("%03d", index);
         if (!prepareDemoTramite(repository, workflowEngineService, id)) return;
 
         String cliente = clienteDemo(index);
-        LocalDateTime inicio = fechaDemo(index);
+        LocalDateTime inicio = fechaDemo(index, scenario);
         Tramite tramite = startTramite(repository, workflowEngineService, id, "demo-prestamo-personal", cliente, inicio);
 
         if (avance == 0) return;
@@ -350,13 +395,13 @@ public class DataInitializer {
                         fieldValue("monto", "Monto solicitado", "NUMERO", String.valueOf(monto)),
                         fieldValue("plazo", "Plazo en meses", "NUMERO", String.valueOf(12 + (index % 5) * 6))
                 ),
-                "Solicitud registrada con documentos iniciales completos.",
-                inicio.plusHours(1),
-                420L + index % 180);
+                informeSolicitud(scenario, "Solicitud registrada con documentos iniciales completos."),
+                fechaPaso(inicio, scenario, 1),
+                duracionDemo(index, scenario, 420L));
 
         if (avance == 1) return;
 
-        boolean aprobado = index % 4 != 0;
+        boolean aprobado = scenario != 4 && index % 4 != 0;
         Map<String, Object> decision = new HashMap<>();
         decision.put("outcome", aprobado ? "Aprobado" : "Rechazado");
         completeStepAt(repository, workflowEngineService, tramite,
@@ -368,9 +413,9 @@ public class DataInitializer {
                         fieldValue("ingresos", "Ingresos mensuales", "NUMERO", String.valueOf(ingresos)),
                         fieldValue("riesgo", "Nivel de riesgo", "SELECCION", aprobado ? nivelRiesgo(index) : "Alto")
                 ),
-                aprobado ? "Score suficiente para revision final." : "El perfil no cumple los parametros minimos.",
-                inicio.plusHours(5),
-                900L + index % 360);
+                aprobado ? informeSolicitud(scenario, "Score suficiente para revision final.") : "Rechazo por ingresos insuficientes y capacidad de pago observada.",
+                fechaPaso(inicio, scenario, 2),
+                duracionDemo(index, scenario, 900L));
 
         if (avance == 2) return;
 
@@ -382,8 +427,8 @@ public class DataInitializer {
                     new HashMap<>(),
                     List.of(fieldValue("dictamen", "Dictamen", "SELECCION", "Aprobar")),
                     "Prestamo aprobado y notificado para desembolso.",
-                    inicio.plusDays(1),
-                    600L + index % 240);
+                    fechaPaso(inicio, scenario, 3),
+                    duracionDemo(index, scenario, 600L));
         } else {
             completeStepAt(repository, workflowEngineService, tramite,
                     "prestamo-rechazo",
@@ -391,9 +436,9 @@ public class DataInitializer {
                     "Funcionario",
                     new HashMap<>(),
                     List.of(fieldValue("motivo", "Motivo comunicado", "TEXTO", "Ingresos insuficientes para el monto solicitado.")),
-                    "Rechazo comunicado al cliente.",
-                    inicio.plusDays(1),
-                    360L + index % 120);
+                    "Rechazo comunicado al cliente y tramite cerrado.",
+                    fechaPaso(inicio, scenario, 3),
+                    duracionDemo(index, scenario, 360L));
         }
     }
 
@@ -401,13 +446,14 @@ public class DataInitializer {
             TramiteRepository repository,
             WorkflowEngineService workflowEngineService,
             int index,
-            int avance
+            int avance,
+            int scenario
     ) {
         String id = "demo-bulk-reclamo-" + String.format("%03d", index);
         if (!prepareDemoTramite(repository, workflowEngineService, id)) return;
 
         String cliente = clienteDemo(index + 50);
-        LocalDateTime inicio = fechaDemo(index + 7);
+        LocalDateTime inicio = fechaDemo(index + 7, scenario);
         Tramite tramite = startTramite(repository, workflowEngineService, id, "demo-reclamo-servicio", cliente, inicio);
 
         if (avance == 0) return;
@@ -421,13 +467,13 @@ public class DataInitializer {
                         fieldValue("cliente", "Cliente", "TEXTO", cliente),
                         fieldValue("motivo", "Motivo del reclamo", "TEXTO", motivoReclamo(index))
                 ),
-                "Reclamo registrado y asignado a revision tecnica.",
-                inicio.plusMinutes(50),
-                300L + index % 150);
+                informeSolicitud(scenario, "Reclamo registrado y asignado a revision tecnica."),
+                fechaPaso(inicio, scenario, 1),
+                duracionDemo(index, scenario, 300L));
 
         if (avance == 1) return;
 
-        boolean procede = index % 3 != 0;
+        boolean procede = scenario == 4 || index % 3 != 0;
         Map<String, Object> decision = new HashMap<>();
         decision.put("outcome", procede ? "Procede" : "No procede");
         completeStepAt(repository, workflowEngineService, tramite,
@@ -439,9 +485,9 @@ public class DataInitializer {
                         fieldValue("diagnostico", "Diagnostico", "TEXTO", procede ? "Se confirma incidencia en el servicio." : "No se evidencia incumplimiento."),
                         fieldValue("resultado", "Resultado", "SELECCION", procede ? "Procede" : "No procede")
                 ),
-                procede ? "Corresponde gestionar compensacion." : "Caso listo para comunicacion de cierre.",
-                inicio.plusHours(4),
-                780L + index % 240);
+                procede ? informeSolicitud(scenario, "Corresponde gestionar compensacion.") : "No procede; caso listo para comunicacion de cierre.",
+                fechaPaso(inicio, scenario, 2),
+                duracionDemo(index, scenario, 780L));
 
         if (avance == 2) return;
 
@@ -453,8 +499,8 @@ public class DataInitializer {
                     new HashMap<>(),
                     List.of(fieldValue("compensacion", "Compensacion propuesta", "TEXTO", "Descuento aplicado en el siguiente ciclo.")),
                     "Compensacion registrada y caso finalizado.",
-                    inicio.plusDays(1),
-                    520L + index % 180);
+                    fechaPaso(inicio, scenario, 3),
+                    duracionDemo(index, scenario, 520L));
         } else {
             completeStepAt(repository, workflowEngineService, tramite,
                     "reclamo-cierre",
@@ -463,8 +509,8 @@ public class DataInitializer {
                     new HashMap<>(),
                     List.of(fieldValue("respuesta", "Respuesta enviada", "TEXTO", "Se comunico el resultado de la revision.")),
                     "Cliente notificado y caso cerrado.",
-                    inicio.plusDays(1),
-                    410L + index % 160);
+                    fechaPaso(inicio, scenario, 3),
+                    duracionDemo(index, scenario, 410L));
         }
     }
 
@@ -472,13 +518,14 @@ public class DataInitializer {
             TramiteRepository repository,
             WorkflowEngineService workflowEngineService,
             int index,
-            int avance
+            int avance,
+            int scenario
     ) {
         String id = "demo-bulk-licencia-" + String.format("%03d", index);
         if (!prepareDemoTramite(repository, workflowEngineService, id)) return;
 
         String cliente = clienteDemo(index + 100);
-        LocalDateTime inicio = fechaDemo(index + 14);
+        LocalDateTime inicio = fechaDemo(index + 14, scenario);
         Tramite tramite = startTramite(repository, workflowEngineService, id, "demo-renovacion-licencia", cliente, inicio);
 
         if (avance == 0) return;
@@ -494,13 +541,13 @@ public class DataInitializer {
                         fieldValue("documento_identidad", "Documento de identidad", "FOTO", "ci-" + index + ".jpg"),
                         fieldValue("certificado_medico", "Certificado medico", "ARCHIVO", "certificado-medico-" + index + ".pdf")
                 ),
-                "Documentos recibidos para validacion.",
-                inicio.plusMinutes(35),
-                260L + index % 120);
+                informeSolicitud(scenario, "Documentos recibidos para validacion."),
+                fechaPaso(inicio, scenario, 1),
+                duracionDemo(index, scenario, 260L));
 
         if (avance == 1) return;
 
-        boolean aprobado = index % 5 != 0;
+        boolean aprobado = scenario != 4 && index % 5 != 0;
         Map<String, Object> decision = new HashMap<>();
         decision.put("outcome", aprobado ? "Aprobado" : "Observado");
         completeStepAt(repository, workflowEngineService, tramite,
@@ -512,9 +559,9 @@ public class DataInitializer {
                         fieldValue("observaciones", "Observaciones", "TEXTO", aprobado ? "Documentos correctos." : "Certificado medico requiere correccion."),
                         fieldValue("resultado", "Resultado", "SELECCION", aprobado ? "Aprobado" : "Observado")
                 ),
-                aprobado ? "Solicitud habilitada para pago y entrega." : "Se requiere subsanar documentos.",
-                inicio.plusHours(3),
-                640L + index % 210);
+                aprobado ? informeSolicitud(scenario, "Solicitud habilitada para pago y entrega.") : "Observacion documental: se requiere correccion del certificado medico.",
+                fechaPaso(inicio, scenario, 2),
+                duracionDemo(index, scenario, 640L));
 
         if (avance == 2) return;
 
@@ -529,8 +576,8 @@ public class DataInitializer {
                             fieldValue("numero_licencia", "Numero de licencia renovada", "TEXTO", "LIC-" + (2026000 + index))
                     ),
                     "Pago confirmado y licencia entregada.",
-                    inicio.plusDays(1),
-                    480L + index % 160);
+                    fechaPaso(inicio, scenario, 3),
+                    duracionDemo(index, scenario, 480L));
         } else {
             completeStepAt(repository, workflowEngineService, tramite,
                     "licencia-observacion",
@@ -541,9 +588,9 @@ public class DataInitializer {
                             fieldValue("detalle_observacion", "Detalle de observacion", "TEXTO", "Actualizar certificado medico."),
                             fieldValue("documento_corregido", "Documento corregido", "ARCHIVO", "pendiente")
                     ),
-                    "Observacion enviada al solicitante.",
-                    inicio.plusDays(1),
-                    360L + index % 140);
+                    "Observacion enviada al solicitante para correccion documental.",
+                    fechaPaso(inicio, scenario, 3),
+                    duracionDemo(index, scenario, 360L));
         }
     }
 
@@ -599,6 +646,86 @@ public class DataInitializer {
         log.setInformeIA("Tramite iniciado.");
         log.setDuracionSegundos(0L);
         return log;
+    }
+
+    private int avanceDemo(int index, int scenario) {
+        if (scenario == 0) return 4;
+        if (scenario == 1) return 2 + index % 2;
+        if (scenario == 2) return 1 + index % 2;
+        if (scenario == 3) return index % 3 == 0 ? 0 : 1;
+        if (scenario == 4) return 2;
+        if (scenario == 5) return 1 + index % 3;
+        if (scenario == 6) return 4;
+        return index % 5;
+    }
+
+    private LocalDateTime fechaDemo(int index, int scenario) {
+        LocalDateTime now = LocalDateTime.now();
+        if (scenario == 0) {
+            return now.minusDays(index % 2).minusHours(1 + index % 5);
+        }
+        if (scenario == 1) {
+            return now.minusDays(3L + index % 6).minusHours(index % 8);
+        }
+        if (scenario == 2) {
+            return now.minusDays(14L + index % 22).minusHours(index % 12);
+        }
+        if (scenario == 3) {
+            return now.minusDays(6L + index % 10).minusHours(index % 9);
+        }
+        if (scenario == 4) {
+            return now.minusDays(8L + index % 18).minusHours(index % 7);
+        }
+        if (scenario == 5) {
+            return now.minusDays(5L + index % 14).minusHours(index % 10);
+        }
+        if (scenario == 6) {
+            return now.minusDays(1L + index % 12).minusHours(index % 6);
+        }
+        return fechaDemo(index);
+    }
+
+    private LocalDateTime fechaPaso(LocalDateTime inicio, int scenario, int step) {
+        LocalDateTime fecha;
+        if (scenario == 0) {
+            fecha = inicio.plusHours(step * 2L);
+        } else if (scenario == 1) {
+            fecha = inicio.plusHours(step * 9L);
+        } else if (scenario == 2) {
+            fecha = inicio.plusDays(step);
+        } else if (scenario == 3) {
+            fecha = inicio.plusHours(step * 12L);
+        } else if (scenario == 4) {
+            fecha = inicio.plusDays(step * 2L);
+        } else if (scenario == 5) {
+            fecha = inicio.plusHours(step * 18L);
+        } else if (scenario == 6) {
+            fecha = inicio.plusHours(step * 5L);
+        } else {
+            fecha = inicio.plusHours(step * 4L);
+        }
+
+        LocalDateTime maxFecha = LocalDateTime.now().minusMinutes(10L + step);
+        return fecha.isAfter(maxFecha) ? maxFecha : fecha;
+    }
+
+    private long duracionDemo(int index, int scenario, long baseSeconds) {
+        long jitter = index % 240;
+        if (scenario == 0) return baseSeconds + jitter;
+        if (scenario == 1) return baseSeconds * 3 + jitter;
+        if (scenario == 2) return baseSeconds * 8 + jitter;
+        if (scenario == 3) return baseSeconds * 4 + jitter;
+        if (scenario == 4) return baseSeconds * 5 + jitter;
+        if (scenario == 5) return baseSeconds * 6 + jitter;
+        return baseSeconds * 2 + jitter;
+    }
+
+    private String informeSolicitud(int scenario, String base) {
+        if (scenario == 2) return base + " Caso estancado por cola operativa y seguimiento pendiente.";
+        if (scenario == 3) return base + " Revisar documentos obligatorios antes de avanzar.";
+        if (scenario == 4) return base + " Observacion registrada por retrabajo o correccion requerida.";
+        if (scenario == 5) return base + " Area con alta carga de tramites activos.";
+        return base;
     }
 
     private String inicioNodeId(String politicaId) {
@@ -953,6 +1080,29 @@ public class DataInitializer {
         return departamento;
     }
 
+    private void removeLegacyDemoDepartamentos(DepartamentoRepository repository) {
+        List<String> fixedIds = List.of("d-atencion", "d-riesgos", "d-aprobacion", "d-tecnico", "d-caja");
+        List<String> demoNames = List.of(
+                "Atencion al Cliente",
+                "Riesgos Crediticios",
+                "Direccion General",
+                "Revision Tecnica",
+                "Caja"
+        );
+        repository.findAll().stream()
+                .filter(departamento -> departamento.getId() != null && !fixedIds.contains(departamento.getId()))
+                .filter(departamento -> demoNames.contains(departamento.getNombre()))
+                .forEach(departamento -> repository.deleteById(departamento.getId()));
+    }
+
+    private void ensureDepartamento(DepartamentoRepository repository, String id, String nombre, String descripcion) {
+        Departamento departamento = repository.findById(id).orElseGet(Departamento::new);
+        departamento.setId(id);
+        departamento.setNombre(nombre);
+        departamento.setDescripcion(descripcion);
+        repository.save(departamento);
+    }
+
     private void ensureUsuario(UsuarioRepository repository, String username, String email, String password, String rol, String departamentoId) {
         Usuario usuario = repository.findByUsername(username).orElseGet(Usuario::new);
         usuario.setUsername(username);
@@ -1015,5 +1165,43 @@ public class DataInitializer {
         conexion.setDestinoId(destinoId);
         conexion.setCondicion(condicion);
         return conexion;
+    }
+
+    private String formularioContenido(Tramite tramite, LogActividad log) {
+        StringBuilder json = new StringBuilder();
+        json.append("{");
+        appendJsonField(json, "tramiteId", tramite.getId());
+        json.append(",");
+        appendJsonField(json, "cliente", tramite.getCliente());
+        json.append(",");
+        appendJsonField(json, "nodo", log.getNombreNodo());
+        json.append(",");
+        appendJsonField(json, "informeIA", log.getInformeIA());
+        json.append(",\"campos\":{");
+        for (int i = 0; i < log.getDatosFormulario().size(); i++) {
+            CampoFormulario campo = log.getDatosFormulario().get(i);
+            if (i > 0) {
+                json.append(",");
+            }
+            appendJsonField(json, campo.getNombre(), campo.getValor());
+        }
+        json.append("}}");
+        return json.toString();
+    }
+
+    private void appendJsonField(StringBuilder json, String key, String value) {
+        json.append("\"").append(escapeJson(key)).append("\":");
+        json.append("\"").append(escapeJson(value)).append("\"");
+    }
+
+    private String escapeJson(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r");
     }
 }

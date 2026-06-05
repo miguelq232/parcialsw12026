@@ -1,6 +1,7 @@
 import { ChangeDetectorRef, Component, OnDestroy, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import * as tf from '@tensorflow/tfjs';
 import { WorkflowService } from '../../services/workflow.service';
 import { AuthService } from '../../services/auth.service';
@@ -122,6 +123,7 @@ function getSpeechRecognitionCtor(): any {
                       <div *ngSwitchCase="'FOTO'" class="file-field">
                         <input type="file" accept="image/*" class="minimal-input" (change)="uploadCampoFile(campo, $event)">
                         <a *ngIf="campo.archivoUrl" [href]="getFileUrl(campo.archivoUrl)" target="_blank">{{ campo.archivoNombre || 'Ver imagen cargada' }}</a>
+                        <img *ngIf="isImageFile(campo)" class="upload-image-preview" [src]="getFileUrl(campo.archivoUrl)" [alt]="campo.archivoNombre || campo.etiqueta">
                         <small *ngIf="campo.uploading">Subiendo archivo...</small>
                       </div>
                       <div *ngSwitchCase="'ARCHIVO'" class="file-field">
@@ -264,12 +266,23 @@ function getSpeechRecognitionCtor(): any {
                     <h4 style="margin: 0; font-size: 0.875rem; color: #1e293b;">{{ log.nombreNodo }}</h4>
                     <span style="font-size: 0.75rem; color: #64748b;">{{ log.fechaCompletado | date:'dd/MM HH:mm' }}</span>
                   </div>
-                  <div *ngIf="log.datosFormulario?.length" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-                    <div *ngFor="let c of log.datosFormulario" style="background: #f8fafc; padding: 6px; border-radius: 4px; border: 1px solid #e2e8f0;">
-                      <span style="font-size: 0.7rem; font-weight: 700; color: #64748b; display: block;">{{ c.etiqueta }}:</span>
-                      <a *ngIf="c.archivoUrl; else plainValue" [href]="getFileUrl(c.archivoUrl)" target="_blank" style="font-size: 0.813rem; color: #2563eb; font-weight: 700; text-decoration: none;">{{ c.archivoNombre || 'Abrir archivo' }}</a>
+                  <div *ngIf="log.datosFormulario?.length" class="history-fields">
+                    <div *ngFor="let c of log.datosFormulario" class="history-field" [class.with-preview]="c.archivoUrl">
+                      <span class="history-field-label">{{ c.etiqueta }}:</span>
+                      <ng-container *ngIf="c.archivoUrl; else plainValue">
+                        <div class="history-file-header">
+                          <span class="history-file-type">{{ getFileTypeLabel(c) }}</span>
+                          <a [href]="getFileUrl(c.archivoUrl)" target="_blank">{{ c.archivoNombre || 'Abrir archivo' }}</a>
+                        </div>
+                        <img *ngIf="isImageFile(c)" class="history-image-preview" [src]="getFileUrl(c.archivoUrl)" [alt]="c.archivoNombre || c.etiqueta">
+                        <iframe *ngIf="isPdfFile(c)" class="history-pdf-preview" [src]="getSafeFileUrl(c)" title="Vista previa PDF"></iframe>
+                        <div *ngIf="!isImageFile(c) && !isPdfFile(c)" class="history-document-preview">
+                          <strong>{{ c.archivoNombre || c.valor || 'Documento adjunto' }}</strong>
+                          <span>{{ c.archivoTipo || 'Archivo adjunto' }}</span>
+                        </div>
+                      </ng-container>
                       <ng-template #plainValue>
-                        <span style="font-size: 0.813rem; color: #1e293b;">{{ c.valor || 'N/A' }}</span>
+                        <span class="history-plain-value">{{ c.valor || 'N/A' }}</span>
                       </ng-template>
                     </div>
                   </div>
@@ -338,6 +351,81 @@ function getSpeechRecognitionCtor(): any {
     .file-field { display: grid; gap: 6px; }
     .file-field a { color: #2563eb; font-size: 0.8rem; font-weight: 600; text-decoration: none; }
     .file-field small { color: var(--text-muted); font-size: 0.74rem; }
+    .upload-image-preview {
+      width: 100%;
+      max-height: 180px;
+      object-fit: contain;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+    }
+    .history-fields {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .history-field {
+      background: #f8fafc;
+      padding: 8px;
+      border-radius: 6px;
+      border: 1px solid #e2e8f0;
+      min-width: 0;
+    }
+    .history-field.with-preview {
+      grid-column: span 2;
+    }
+    .history-field-label {
+      font-size: 0.7rem;
+      font-weight: 700;
+      color: #64748b;
+      display: block;
+      margin-bottom: 4px;
+    }
+    .history-file-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .history-file-header a {
+      color: #2563eb;
+      font-size: 0.813rem;
+      font-weight: 700;
+      text-decoration: none;
+      overflow-wrap: anywhere;
+    }
+    .history-file-type {
+      flex-shrink: 0;
+      background: #e0f2fe;
+      color: #0369a1;
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 0.68rem;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+    .history-image-preview,
+    .history-pdf-preview,
+    .history-document-preview {
+      width: 100%;
+      background: white;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+    }
+    .history-image-preview {
+      max-height: 280px;
+      object-fit: contain;
+      display: block;
+    }
+    .history-pdf-preview {
+      height: 320px;
+    }
+    .history-document-preview {
+      display: grid;
+      gap: 4px;
+      padding: 12px;
+    }
     .report-area { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
     .report-area label { font-size: 0.75rem; color: var(--text-muted); }
     textarea { padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; height: 120px; resize: none; }
@@ -697,6 +785,7 @@ function getSpeechRecognitionCtor(): any {
 export class MonitorComponent implements OnInit, OnDestroy {
   private workflowService = inject(WorkflowService);
   private cdr = inject(ChangeDetectorRef);
+  private sanitizer = inject(DomSanitizer);
   public auth = inject(AuthService);
   tramites: any[] = [];
   selectedTramite: any = null;
@@ -720,6 +809,7 @@ export class MonitorComponent implements OnInit, OnDestroy {
   private voiceFinalTranscript = '';
   private shouldProcessVoiceOnEnd = false;
   private voiceRestartAttempts = 0;
+  private safeFileUrlCache = new Map<string, SafeResourceUrl>();
 
   openModal() {
     this.showModal = true;
@@ -1628,6 +1718,36 @@ export class MonitorComponent implements OnInit, OnDestroy {
     if (!path) return '';
     if (path.startsWith('http')) return path;
     return path;
+  }
+
+  getSafeFileUrl(campo: any): SafeResourceUrl {
+    const url = this.getFileUrl(campo?.archivoUrl || '');
+    if (!this.safeFileUrlCache.has(url)) {
+      this.safeFileUrlCache.set(url, this.sanitizer.bypassSecurityTrustResourceUrl(url));
+    }
+    return this.safeFileUrlCache.get(url) as SafeResourceUrl;
+  }
+
+  isImageFile(campo: any): boolean {
+    if (!campo?.archivoUrl) return false;
+    const type = String(campo.archivoTipo || '').toLowerCase();
+    const name = String(campo.archivoNombre || campo.archivoUrl || '').toLowerCase();
+    return campo.tipo === 'FOTO'
+      || type.startsWith('image/')
+      || /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(name);
+  }
+
+  isPdfFile(campo: any): boolean {
+    if (!campo?.archivoUrl) return false;
+    const type = String(campo.archivoTipo || '').toLowerCase();
+    const name = String(campo.archivoNombre || campo.archivoUrl || '').toLowerCase();
+    return type === 'application/pdf' || /\.pdf$/i.test(name);
+  }
+
+  getFileTypeLabel(campo: any): string {
+    if (this.isImageFile(campo)) return 'Imagen';
+    if (this.isPdfFile(campo)) return 'PDF';
+    return 'Archivo';
   }
 
   hasPendingUploads(): boolean {
