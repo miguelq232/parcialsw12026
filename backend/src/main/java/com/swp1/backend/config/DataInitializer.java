@@ -34,6 +34,9 @@ public class DataInitializer {
     @Value("${app.demo.bulk-tramites.count:45}")
     private int bulkDemoTramitesCount;
 
+    @Value("${app.demo.reset-tramites.enabled:true}")
+    private boolean resetDemoTramitesEnabled;
+
     @Bean
     CommandLineRunner initDatabase(
             DepartamentoRepository departamentoRepository,
@@ -73,12 +76,9 @@ public class DataInitializer {
             TramiteRepository tramiteRepository,
             WorkflowEngineService workflowEngineService
     ) {
-        PoliticaDeNegocio prestamo = politicaRepository.findById("demo-prestamo-personal")
-                .orElseGet(() -> politicaRepository.save(buildPrestamoPersonalPolicy()));
-        PoliticaDeNegocio reclamo = politicaRepository.findById("demo-reclamo-servicio")
-                .orElseGet(() -> politicaRepository.save(buildReclamoServicioPolicy()));
-        PoliticaDeNegocio licencia = politicaRepository.findById("demo-renovacion-licencia")
-                .orElseGet(() -> politicaRepository.save(buildRenovacionLicenciaPolicy()));
+        PoliticaDeNegocio prestamo = politicaRepository.save(buildPrestamoPersonalPolicy());
+        PoliticaDeNegocio reclamo = politicaRepository.save(buildReclamoServicioPolicy());
+        PoliticaDeNegocio licencia = politicaRepository.save(buildRenovacionLicenciaPolicy());
 
         try {
             workflowEngineService.deployPolitica(prestamo);
@@ -89,7 +89,9 @@ public class DataInitializer {
         }
 
         seedTramiteNuevoPrestamo(tramiteRepository, workflowEngineService);
+        seedTramitePrestamoEnEvaluacion(tramiteRepository, workflowEngineService);
         seedTramitePrestamoEnAprobacion(tramiteRepository, workflowEngineService);
+        seedTramitePrestamoFinalizado(tramiteRepository, workflowEngineService);
         seedTramiteReclamoNuevo(tramiteRepository, workflowEngineService);
         seedTramiteReclamoFinalizado(tramiteRepository, workflowEngineService);
         seedTramiteLicenciaNuevo(tramiteRepository, workflowEngineService);
@@ -100,25 +102,55 @@ public class DataInitializer {
     }
 
     private void seedTramiteNuevoPrestamo(TramiteRepository repository, WorkflowEngineService workflowEngineService) {
-        if (repository.existsById("demo-tramite-prestamo-nuevo")) return;
+        String id = "demo-tramite-prestamo-nuevo";
+        if (!prepareDemoTramite(repository, workflowEngineService, id)) return;
 
-        Tramite tramite = startTramite(repository, workflowEngineService,
-                "demo-tramite-prestamo-nuevo",
+        startTramite(repository, workflowEngineService,
+                id,
                 "demo-prestamo-personal",
-                "Cliente Demo - Maria Lopez");
-        tramite.setFechaInicio(LocalDateTime.now().minusHours(2));
-        repository.save(tramite);
+                "Cliente Demo - Maria Lopez",
+                LocalDateTime.now().minusHours(2));
+    }
+
+    private void seedTramitePrestamoEnEvaluacion(TramiteRepository repository, WorkflowEngineService workflowEngineService) {
+        String id = "demo-tramite-prestamo-evaluacion";
+        if (!prepareDemoTramite(repository, workflowEngineService, id)) return;
+
+        LocalDateTime inicio = LocalDateTime.now().minusHours(1).minusMinutes(20);
+        Tramite tramite = startTramite(repository, workflowEngineService,
+                id,
+                "demo-prestamo-personal",
+                "Cliente Demo - Elena Suarez",
+                inicio);
+
+        completeStepAt(repository, workflowEngineService, tramite,
+                "prestamo-solicitud",
+                "Registro de solicitud",
+                "Funcionario",
+                new HashMap<>(),
+                List.of(
+                        fieldValue("cliente", "Nombre completo", "TEXTO", "Elena Suarez"),
+                        fieldValue("ci", "Documento de identidad", "TEXTO", "9123456"),
+                        fieldValue("monto", "Monto solicitado", "NUMERO", "18000"),
+                        fieldValue("plazo", "Plazo en meses", "NUMERO", "18")
+                ),
+                "Solicitud registrada y enviada a evaluacion de riesgo.",
+                inicio.plusMinutes(7),
+                420L);
     }
 
     private void seedTramitePrestamoEnAprobacion(TramiteRepository repository, WorkflowEngineService workflowEngineService) {
-        if (repository.existsById("demo-tramite-prestamo-aprobacion")) return;
+        String id = "demo-tramite-prestamo-aprobacion";
+        if (!prepareDemoTramite(repository, workflowEngineService, id)) return;
 
+        LocalDateTime inicio = LocalDateTime.now().minusHours(4);
         Tramite tramite = startTramite(repository, workflowEngineService,
-                "demo-tramite-prestamo-aprobacion",
+                id,
                 "demo-prestamo-personal",
-                "Cliente Demo - Carlos Rojas");
+                "Cliente Demo - Carlos Rojas",
+                inicio);
 
-        completeStep(repository, workflowEngineService, tramite,
+        completeStepAt(repository, workflowEngineService, tramite,
                 "prestamo-solicitud",
                 "Registro de solicitud",
                 "Funcionario",
@@ -128,11 +160,13 @@ public class DataInitializer {
                         fieldValue("ci", "Documento de identidad", "TEXTO", "7845123"),
                         fieldValue("monto", "Monto solicitado", "NUMERO", "25000")
                 ),
-                "Cliente registrado con documentacion completa.");
+                "Cliente registrado con documentacion completa.",
+                inicio.plusMinutes(7),
+                420L);
 
         Map<String, Object> decision = new HashMap<>();
         decision.put("outcome", "Aprobado");
-        completeStep(repository, workflowEngineService, tramite,
+        completeStepAt(repository, workflowEngineService, tramite,
                 "prestamo-evaluacion",
                 "Evaluacion de riesgo",
                 "Funcionario 2",
@@ -141,29 +175,86 @@ public class DataInitializer {
                         fieldValue("ingresos", "Ingresos mensuales", "NUMERO", "8400"),
                         fieldValue("riesgo", "Nivel de riesgo", "SELECCION", "Bajo")
                 ),
-                "Score suficiente para enviar a aprobacion final.");
+                "Score suficiente para enviar a aprobacion final.",
+                inicio.plusMinutes(39),
+                1920L);
+    }
+
+    private void seedTramitePrestamoFinalizado(TramiteRepository repository, WorkflowEngineService workflowEngineService) {
+        String id = "demo-tramite-prestamo-finalizado";
+        if (!prepareDemoTramite(repository, workflowEngineService, id)) return;
+
+        LocalDateTime inicio = LocalDateTime.now().minusDays(1).minusHours(2);
+        Tramite tramite = startTramite(repository, workflowEngineService,
+                id,
+                "demo-prestamo-personal",
+                "Cliente Demo - Pablo Vargas",
+                inicio);
+
+        completeStepAt(repository, workflowEngineService, tramite,
+                "prestamo-solicitud",
+                "Registro de solicitud",
+                "Funcionario",
+                new HashMap<>(),
+                List.of(
+                        fieldValue("cliente", "Nombre completo", "TEXTO", "Pablo Vargas"),
+                        fieldValue("ci", "Documento de identidad", "TEXTO", "8066771"),
+                        fieldValue("monto", "Monto solicitado", "NUMERO", "32000"),
+                        fieldValue("plazo", "Plazo en meses", "NUMERO", "24")
+                ),
+                "Solicitud completa, documentos iniciales verificados.",
+                inicio.plusMinutes(9),
+                540L);
+
+        Map<String, Object> decision = new HashMap<>();
+        decision.put("outcome", "Aprobado");
+        completeStepAt(repository, workflowEngineService, tramite,
+                "prestamo-evaluacion",
+                "Evaluacion de riesgo",
+                "Funcionario 2",
+                decision,
+                List.of(
+                        fieldValue("ingresos", "Ingresos mensuales", "NUMERO", "9700"),
+                        fieldValue("riesgo", "Nivel de riesgo", "SELECCION", "Bajo")
+                ),
+                "Perfil aprobado por capacidad de pago y bajo riesgo.",
+                inicio.plusHours(3),
+                9600L);
+
+        completeStepAt(repository, workflowEngineService, tramite,
+                "prestamo-aprobacion",
+                "Aprobacion final",
+                "Funcionario 3",
+                new HashMap<>(),
+                List.of(fieldValue("dictamen", "Dictamen", "SELECCION", "Aprobar")),
+                "Aprobacion gerencial emitida y credito cerrado.",
+                inicio.plusHours(5),
+                7200L);
     }
 
     private void seedTramiteReclamoNuevo(TramiteRepository repository, WorkflowEngineService workflowEngineService) {
-        if (repository.existsById("demo-tramite-reclamo-nuevo")) return;
+        String id = "demo-tramite-reclamo-nuevo";
+        if (!prepareDemoTramite(repository, workflowEngineService, id)) return;
 
-        Tramite tramite = startTramite(repository, workflowEngineService,
-                "demo-tramite-reclamo-nuevo",
+        startTramite(repository, workflowEngineService,
+                id,
                 "demo-reclamo-servicio",
-                "Cliente Demo - Ana Vargas");
-        tramite.setFechaInicio(LocalDateTime.now().minusMinutes(45));
-        repository.save(tramite);
+                "Cliente Demo - Ana Vargas",
+                LocalDateTime.now().minusMinutes(45));
     }
 
     private void seedTramiteReclamoFinalizado(TramiteRepository repository, WorkflowEngineService workflowEngineService) {
-        if (repository.existsById("demo-tramite-reclamo-finalizado")) return;
+        String id = "demo-tramite-reclamo-finalizado";
+        if (!prepareDemoTramite(repository, workflowEngineService, id)) return;
 
+        LocalDateTime inicio = LocalDateTime.now().minusDays(1).minusHours(3);
         Tramite tramite = startTramite(repository, workflowEngineService,
-                "demo-tramite-reclamo-finalizado",
+                id,
                 "demo-reclamo-servicio",
-                "Cliente Demo - Luis Perez");
+                "Cliente Demo - Luis Perez",
+                inicio);
 
-        completeStep(repository, workflowEngineService, tramite,
+        completeStepAt(repository, workflowEngineService, tramite,
                 "reclamo-registro",
                 "Registro del reclamo",
                 "Funcionario",
@@ -172,11 +263,13 @@ public class DataInitializer {
                         fieldValue("cliente", "Cliente", "TEXTO", "Luis Perez"),
                         fieldValue("motivo", "Motivo del reclamo", "TEXTO", "Demora en atencion")
                 ),
-                "Reclamo registrado con prioridad normal.");
+                "Reclamo registrado con prioridad normal.",
+                inicio.plusMinutes(11),
+                660L);
 
         Map<String, Object> decision = new HashMap<>();
         decision.put("outcome", "No procede");
-        completeStep(repository, workflowEngineService, tramite,
+        completeStepAt(repository, workflowEngineService, tramite,
                 "reclamo-inspeccion",
                 "Revision tecnica",
                 "Funcionario Tecnico",
@@ -185,26 +278,30 @@ public class DataInitializer {
                         fieldValue("diagnostico", "Diagnostico", "TEXTO", "No se evidencia incumplimiento de SLA"),
                         fieldValue("resultado", "Resultado", "SELECCION", "No procede")
                 ),
-                "No corresponde compensacion segun condiciones del servicio.");
+                "No corresponde compensacion segun condiciones del servicio.",
+                inicio.plusHours(2),
+                6540L);
 
-        completeStep(repository, workflowEngineService, tramite,
+        completeStepAt(repository, workflowEngineService, tramite,
                 "reclamo-cierre",
                 "Comunicacion al cliente",
                 "Funcionario 3",
                 new HashMap<>(),
                 List.of(fieldValue("respuesta", "Respuesta enviada", "TEXTO", "Se informo el resultado al cliente.")),
-                "Caso cerrado y comunicado.");
+                "Caso cerrado y comunicado.",
+                inicio.plusHours(3),
+                3600L);
     }
 
     private void seedTramiteLicenciaNuevo(TramiteRepository repository, WorkflowEngineService workflowEngineService) {
-        if (repository.existsById("demo-tramite-licencia-nuevo")) return;
+        String id = "demo-tramite-licencia-nuevo";
+        if (!prepareDemoTramite(repository, workflowEngineService, id)) return;
 
-        Tramite tramite = startTramite(repository, workflowEngineService,
-                "demo-tramite-licencia-nuevo",
+        startTramite(repository, workflowEngineService,
+                id,
                 "demo-renovacion-licencia",
-                "Cliente Demo - Sofia Medina");
-        tramite.setFechaInicio(LocalDateTime.now().minusMinutes(25));
-        repository.save(tramite);
+                "Cliente Demo - Sofia Medina",
+                LocalDateTime.now().minusMinutes(25));
     }
 
     private void seedBulkDemoTramites(TramiteRepository repository, WorkflowEngineService workflowEngineService, int count) {
@@ -232,13 +329,11 @@ public class DataInitializer {
             int avance
     ) {
         String id = "demo-bulk-prestamo-" + String.format("%03d", index);
-        if (repository.existsById(id)) return;
+        if (!prepareDemoTramite(repository, workflowEngineService, id)) return;
 
         String cliente = clienteDemo(index);
         LocalDateTime inicio = fechaDemo(index);
-        Tramite tramite = startTramite(repository, workflowEngineService, id, "demo-prestamo-personal", cliente);
-        tramite.setFechaInicio(inicio);
-        repository.save(tramite);
+        Tramite tramite = startTramite(repository, workflowEngineService, id, "demo-prestamo-personal", cliente, inicio);
 
         if (avance == 0) return;
 
@@ -309,13 +404,11 @@ public class DataInitializer {
             int avance
     ) {
         String id = "demo-bulk-reclamo-" + String.format("%03d", index);
-        if (repository.existsById(id)) return;
+        if (!prepareDemoTramite(repository, workflowEngineService, id)) return;
 
         String cliente = clienteDemo(index + 50);
         LocalDateTime inicio = fechaDemo(index + 7);
-        Tramite tramite = startTramite(repository, workflowEngineService, id, "demo-reclamo-servicio", cliente);
-        tramite.setFechaInicio(inicio);
-        repository.save(tramite);
+        Tramite tramite = startTramite(repository, workflowEngineService, id, "demo-reclamo-servicio", cliente, inicio);
 
         if (avance == 0) return;
 
@@ -382,13 +475,11 @@ public class DataInitializer {
             int avance
     ) {
         String id = "demo-bulk-licencia-" + String.format("%03d", index);
-        if (repository.existsById(id)) return;
+        if (!prepareDemoTramite(repository, workflowEngineService, id)) return;
 
         String cliente = clienteDemo(index + 100);
         LocalDateTime inicio = fechaDemo(index + 14);
-        Tramite tramite = startTramite(repository, workflowEngineService, id, "demo-renovacion-licencia", cliente);
-        tramite.setFechaInicio(inicio);
-        repository.save(tramite);
+        Tramite tramite = startTramite(repository, workflowEngineService, id, "demo-renovacion-licencia", cliente, inicio);
 
         if (avance == 0) return;
 
@@ -461,20 +552,60 @@ public class DataInitializer {
             WorkflowEngineService workflowEngineService,
             String id,
             String politicaId,
-            String cliente
+            String cliente,
+            LocalDateTime fechaInicio
     ) {
         Tramite tramite = new Tramite();
         tramite.setId(id);
         tramite.setPoliticaId(politicaId);
         tramite.setCliente(cliente);
         tramite.setEstado("EN_PROCESO");
-        tramite.setFechaInicio(LocalDateTime.now().minusMinutes(20));
+        tramite.setFechaInicio(fechaInicio);
         tramite.setHistorial(new ArrayList<>());
+        tramite.getHistorial().add(buildInicioLog(politicaId, fechaInicio));
         tramite = repository.save(tramite);
 
         workflowEngineService.iniciarTramite(politicaId, tramite.getId());
         tramite.setNodoActualId(workflowEngineService.getNodoActual(tramite.getId()));
         return repository.save(tramite);
+    }
+
+    private boolean prepareDemoTramite(
+            TramiteRepository repository,
+            WorkflowEngineService workflowEngineService,
+            String id
+    ) {
+        if (resetDemoTramitesEnabled) {
+            workflowEngineService.cancelarTramitesActivos(id);
+            repository.deleteById(id);
+            return true;
+        }
+
+        if (repository.existsById(id)) {
+            return false;
+        }
+
+        workflowEngineService.cancelarTramitesActivos(id);
+        return true;
+    }
+
+    private LogActividad buildInicioLog(String politicaId, LocalDateTime fechaInicio) {
+        LogActividad log = new LogActividad();
+        log.setNodoId(inicioNodeId(politicaId));
+        log.setNombreNodo("Inicio");
+        log.setUsuario("Funcionario");
+        log.setFechaCompletado(fechaInicio);
+        log.setDatosFormulario(List.of());
+        log.setInformeIA("Tramite iniciado.");
+        log.setDuracionSegundos(0L);
+        return log;
+    }
+
+    private String inicioNodeId(String politicaId) {
+        if ("demo-prestamo-personal".equals(politicaId)) return "prestamo-inicio";
+        if ("demo-reclamo-servicio".equals(politicaId)) return "reclamo-inicio";
+        if ("demo-renovacion-licencia".equals(politicaId)) return "licencia-inicio";
+        return "inicio";
     }
 
     private void completeStep(
@@ -520,11 +651,138 @@ public class DataInitializer {
             tramite.setHistorial(new ArrayList<>());
         }
         tramite.getHistorial().add(log);
+        appendAutomaticMovementLogs(tramite, nodoId, variables, usuario, fechaCompletado);
         tramite.setNodoActualId(workflowEngineService.getNodoActual(tramite.getId()));
         if ("FIN".equals(tramite.getNodoActualId())) {
             tramite.setEstado("FINALIZADO");
         }
         repository.save(tramite);
+    }
+
+    private void appendAutomaticMovementLogs(
+            Tramite tramite,
+            String completedNodeId,
+            Map<String, Object> variables,
+            String usuario,
+            LocalDateTime fechaBase
+    ) {
+        PoliticaDeNegocio politica = buildDemoPolicyFor(tramite.getPoliticaId());
+        if (politica == null || politica.getNodos() == null || politica.getConexiones() == null) {
+            return;
+        }
+
+        Nodo nextNode = findNextNodeAfterCompletion(politica, completedNodeId, variables, usuario, fechaBase, tramite);
+        if (isEndNode(nextNode)) {
+            appendLogIfMissing(tramite, buildAutomaticLog(
+                    nextNode,
+                    usuario,
+                    fechaBase.plusSeconds(2),
+                    "Tramite finalizado.",
+                    List.of(),
+                    0L
+            ));
+        }
+    }
+
+    private PoliticaDeNegocio buildDemoPolicyFor(String politicaId) {
+        if ("demo-prestamo-personal".equals(politicaId)) return buildPrestamoPersonalPolicy();
+        if ("demo-reclamo-servicio".equals(politicaId)) return buildReclamoServicioPolicy();
+        if ("demo-renovacion-licencia".equals(politicaId)) return buildRenovacionLicenciaPolicy();
+        return null;
+    }
+
+    private Nodo findNextNodeAfterCompletion(
+            PoliticaDeNegocio politica,
+            String completedNodeId,
+            Map<String, Object> variables,
+            String usuario,
+            LocalDateTime fechaBase,
+            Tramite tramite
+    ) {
+        Conexion firstConnection = findFirstConnectionFrom(politica, completedNodeId);
+        if (firstConnection == null) {
+            return null;
+        }
+
+        Nodo firstTarget = findNode(politica, firstConnection.getDestinoId());
+        if (firstTarget != null && firstTarget.getTipo() == Nodo.TipoNodo.DECISION) {
+            String outcome = variables != null && variables.get("outcome") != null
+                    ? variables.get("outcome").toString()
+                    : "";
+
+            appendLogIfMissing(tramite, buildAutomaticLog(
+                    firstTarget,
+                    usuario,
+                    fechaBase.plusSeconds(1),
+                    outcome.isBlank() ? "Decision evaluada." : "Ruta seleccionada: " + outcome,
+                    outcome.isBlank() ? List.of() : List.of(fieldValue("outcome", "Resultado", "SELECCION", outcome)),
+                    0L
+            ));
+
+            Conexion selected = findDecisionConnection(politica, firstTarget.getId(), outcome);
+            return selected != null ? findNode(politica, selected.getDestinoId()) : null;
+        }
+
+        return firstTarget;
+    }
+
+    private Conexion findFirstConnectionFrom(PoliticaDeNegocio politica, String nodeId) {
+        return politica.getConexiones().stream()
+                .filter(connection -> nodeId != null && nodeId.equals(connection.getOrigenId()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private Conexion findDecisionConnection(PoliticaDeNegocio politica, String decisionNodeId, String outcome) {
+        return politica.getConexiones().stream()
+                .filter(connection -> decisionNodeId.equals(connection.getOrigenId()))
+                .filter(connection -> {
+                    String condicion = connection.getCondicion();
+                    if (outcome != null && !outcome.isBlank()) {
+                        return outcome.equals(condicion);
+                    }
+                    return condicion == null || condicion.isBlank() || "DEFAULT".equals(condicion);
+                })
+                .findFirst()
+                .orElse(null);
+    }
+
+    private Nodo findNode(PoliticaDeNegocio politica, String nodeId) {
+        return politica.getNodos().stream()
+                .filter(node -> nodeId != null && nodeId.equals(node.getId()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private boolean isEndNode(Nodo node) {
+        return node != null && (node.getTipo() == Nodo.TipoNodo.FIN || node.getTipo() == Nodo.TipoNodo.END);
+    }
+
+    private LogActividad buildAutomaticLog(
+            Nodo node,
+            String usuario,
+            LocalDateTime fechaCompletado,
+            String informe,
+            List<CampoFormulario> campos,
+            Long duracionSegundos
+    ) {
+        LogActividad log = new LogActividad();
+        log.setNodoId(node.getId());
+        log.setNombreNodo(node.getNombre());
+        log.setUsuario(usuario);
+        log.setFechaCompletado(fechaCompletado);
+        log.setInformeIA(informe);
+        log.setDatosFormulario(campos);
+        log.setDuracionSegundos(duracionSegundos);
+        return log;
+    }
+
+    private void appendLogIfMissing(Tramite tramite, LogActividad log) {
+        boolean exists = tramite.getHistorial().stream()
+                .anyMatch(item -> log.getNodoId() != null && log.getNodoId().equals(item.getNodoId()));
+        if (!exists) {
+            tramite.getHistorial().add(log);
+        }
     }
 
     private LocalDateTime fechaDemo(int index) {

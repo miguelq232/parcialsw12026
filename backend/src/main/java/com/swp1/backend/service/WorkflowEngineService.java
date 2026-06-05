@@ -8,6 +8,7 @@ import org.flowable.bpmn.model.Process;
 import org.flowable.engine.RepositoryService;
 import org.flowable.engine.RuntimeService;
 import org.flowable.engine.TaskService;
+import org.flowable.engine.runtime.ProcessInstance;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import java.util.ArrayList;
@@ -129,6 +130,16 @@ public class WorkflowEngineService {
                 .processInstanceBusinessKey(tramiteId)
                 .singleResult();
         return task != null ? task.getTaskDefinitionKey() : "FIN";
+    }
+
+    public void cancelarTramitesActivos(String tramiteId) {
+        List<ProcessInstance> instances = runtimeService.createProcessInstanceQuery()
+                .processInstanceBusinessKey(tramiteId)
+                .list();
+
+        for (ProcessInstance instance : instances) {
+            runtimeService.deleteProcessInstance(instance.getId(), "Reinicializacion de datos demo");
+        }
     }
 
     private List<String> getFuncionariosAsignados(Nodo nodo, PoliticaDeNegocio politica) {

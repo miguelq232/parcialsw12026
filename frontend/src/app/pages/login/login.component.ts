@@ -12,6 +12,7 @@ interface DemoAccount {
   password: string;
   role: DemoRole;
   area: string;
+  departamentoId?: string;
 }
 
 @Component({
@@ -297,11 +298,11 @@ export class LoginComponent {
 
   demoAccounts: DemoAccount[] = [
     { name: 'Admin 1', email: 'admin@swp1.demo', password: 'admin123', role: 'ADMIN', area: 'Administracion' },
-    { name: 'Funcionario', email: 'funcionario1@swp1.demo', password: 'funcionario123', role: 'FUNCIONARIO', area: 'Atencion' },
-    { name: 'Funcionario 2', email: 'funcionario2@swp1.demo', password: 'funcionario123', role: 'FUNCIONARIO', area: 'Riesgos' },
-    { name: 'Funcionario 3', email: 'funcionario3@swp1.demo', password: 'funcionario123', role: 'FUNCIONARIO', area: 'Aprobacion' },
-    { name: 'Funcionario Tecnico', email: 'tecnico@swp1.demo', password: 'funcionario123', role: 'FUNCIONARIO', area: 'Tecnico' },
-    { name: 'Funcionario Caja', email: 'caja@swp1.demo', password: 'funcionario123', role: 'FUNCIONARIO', area: 'Caja' }
+    { name: 'Funcionario', email: 'funcionario1@swp1.demo', password: 'funcionario123', role: 'FUNCIONARIO', area: 'Atencion', departamentoId: 'd-atencion' },
+    { name: 'Funcionario 2', email: 'funcionario2@swp1.demo', password: 'funcionario123', role: 'FUNCIONARIO', area: 'Riesgos', departamentoId: 'd-riesgos' },
+    { name: 'Funcionario 3', email: 'funcionario3@swp1.demo', password: 'funcionario123', role: 'FUNCIONARIO', area: 'Aprobacion', departamentoId: 'd-aprobacion' },
+    { name: 'Funcionario Tecnico', email: 'tecnico@swp1.demo', password: 'funcionario123', role: 'FUNCIONARIO', area: 'Tecnico', departamentoId: 'd-tecnico' },
+    { name: 'Funcionario Caja', email: 'caja@swp1.demo', password: 'funcionario123', role: 'FUNCIONARIO', area: 'Caja', departamentoId: 'd-caja' }
   ];
 
   private auth = inject(AuthService);
@@ -322,7 +323,7 @@ export class LoginComponent {
   }
 
   loginAs(account: DemoAccount) {
-    this.auth.login(account.role, account.name, account.email);
+    this.auth.login(account.role, account.name, account.email, account.departamentoId);
     this.router.navigate(['/dashboard']);
   }
 }

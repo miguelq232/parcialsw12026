@@ -885,10 +885,15 @@ export class MonitorComponent implements OnInit, OnDestroy {
     if (!node) return false;
 
     const assignees = this.getAssigneesForNode(node, policy);
-    if (assignees.length === 0) return false;
+    const currentUser = this.auth.currentUser();
+    const username = this.normalizeText(currentUser?.username || '');
+    const userDepartamentoId = currentUser?.departamentoId || '';
 
-    const username = this.auth.currentUser()?.username || '';
-    return assignees.includes(username);
+    if (userDepartamentoId && node.departamentoId === userDepartamentoId) {
+      return true;
+    }
+
+    return assignees.some(assignee => this.normalizeText(assignee) === username);
   }
 
   getAssignmentLabel(node: any, policy?: any): string {
@@ -910,6 +915,10 @@ export class MonitorComponent implements OnInit, OnDestroy {
     const node = this.policyNodes.find((item: any) => item.id === nodeId);
     if (node?.tipo === 'INICIO' || node?.tipo === 'START') {
       return Boolean(this.selectedTramite.fechaInicio);
+    }
+    if (node?.tipo === 'FIN' || node?.tipo === 'END') {
+      return this.selectedTramite.estado === 'FINALIZADO'
+        || this.selectedTramite.historial.some((h: any) => h.nodoId === nodeId);
     }
     return this.selectedTramite.historial.some((h: any) => h.nodoId === nodeId);
   }

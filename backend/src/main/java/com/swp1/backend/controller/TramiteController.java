@@ -1,6 +1,10 @@
 package com.swp1.backend.controller;
 
 import com.swp1.backend.model.LogActividad;
+import com.swp1.backend.model.CampoFormulario;
+import com.swp1.backend.model.Conexion;
+import com.swp1.backend.model.Nodo;
+import com.swp1.backend.model.PoliticaDeNegocio;
 import com.swp1.backend.model.Tramite;
 import com.swp1.backend.repository.TramiteRepository;
 import com.swp1.backend.service.WorkflowEngineService;
@@ -45,7 +49,20 @@ public class TramiteController {
             tramite.setPoliticaId(politicaId);
             tramite.setCliente(cliente);
             tramite.setEstado("EN_PROCESO");
-            tramite.setFechaInicio(LocalDateTime.now());
+            LocalDateTime fechaInicio = LocalDateTime.now();
+            tramite.setFechaInicio(fechaInicio);
+            tramite.setHistorial(new java.util.ArrayList<>());
+            Nodo inicio = findStartNode(politica);
+            if (inicio != null) {
+                tramite.getHistorial().add(buildAutomaticLog(
+                        inicio,
+                        "Sistema",
+                        fechaInicio,
+                        "Tramite iniciado.",
+                        List.of(),
+                        0L
+                ));
+            }
             
             tramite = tramiteRepository.save(tramite);
 
@@ -132,6 +149,9 @@ public class TramiteController {
             }
             tramite.getHistorial().add(log);
 
+            PoliticaDeNegocio politica = politicaRepository.findById(tramite.getPoliticaId()).orElse(null);
+            appendAutomaticMovementLogs(tramite, politica, nodoId, variables, usuario, now);
+
             String siguienteNodo = workflowEngineService.getNodoActual(id);
             tramite.setNodoActualId(siguienteNodo);
             
@@ -145,5 +165,144 @@ public class TramiteController {
             return org.springframework.http.ResponseEntity.status(500)
                 .body(java.util.Map.of("error", "Error al completar tarea: " + e.getMessage()));
         }
+    }
+
+    private void appendAutomaticMovementLogs(
+            Tramite tramite,
+            PoliticaDeNegocio politica,
+            String completedNodeId,
+            Map<String, Object> variables,
+            String usuario,
+            LocalDateTime fechaBase
+    ) {
+        if (politica == null || politica.getNodos() == null || politica.getConexiones() == null) {
+            return;
+        }
+
+        Nodo nextNode = findNextNodeAfterCompletion(politica, completedNodeId, variables, usuario, fechaBase, tramite);
+        if (isEndNode(nextNode)) {
+            appendLogIfMissing(tramite, buildAutomaticLog(
+                    nextNode,
+                    usuario,
+                    fechaBase.plusSeconds(2),
+                    "Tramite finalizado.",
+                    List.of(),
+                    0L
+            ));
+        }
+    }
+
+    private Nodo findNextNodeAfterCompletion(
+            PoliticaDeNegocio politica,
+            String completedNodeId,
+            Map<String, Object> variables,
+            String usuario,
+            LocalDateTime fechaBase,
+            Tramite tramite
+    ) {
+        Conexion firstConnection = findFirstConnectionFrom(politica, completedNodeId);
+        if (firstConnection == null) {
+            return null;
+        }
+
+        Nodo firstTarget = findNode(politica, firstConnection.getDestinoId());
+        if (firstTarget != null && firstTarget.getTipo() == Nodo.TipoNodo.DECISION) {
+            String outcome = variables != null && variables.get("outcome") != null
+                    ? variables.get("outcome").toString()
+                    : "";
+
+            appendLogIfMissing(tramite, buildAutomaticLog(
+                    firstTarget,
+                    usuario,
+                    fechaBase.plusSeconds(1),
+                    outcome.isBlank() ? "Decision evaluada." : "Ruta seleccionada: " + outcome,
+                    outcome.isBlank() ? List.of() : List.of(fieldValue("outcome", "Resultado", "SELECCION", outcome)),
+                    0L
+            ));
+
+            Conexion selected = findDecisionConnection(politica, firstTarget.getId(), outcome);
+            return selected != null ? findNode(politica, selected.getDestinoId()) : null;
+        }
+
+        return firstTarget;
+    }
+
+    private Conexion findFirstConnectionFrom(PoliticaDeNegocio politica, String nodeId) {
+        return politica.getConexiones().stream()
+                .filter(connection -> nodeId != null && nodeId.equals(connection.getOrigenId()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private Conexion findDecisionConnection(PoliticaDeNegocio politica, String decisionNodeId, String outcome) {
+        return politica.getConexiones().stream()
+                .filter(connection -> decisionNodeId.equals(connection.getOrigenId()))
+                .filter(connection -> {
+                    String condicion = connection.getCondicion();
+                    if (outcome != null && !outcome.isBlank()) {
+                        return outcome.equals(condicion);
+                    }
+                    return condicion == null || condicion.isBlank() || "DEFAULT".equals(condicion);
+                })
+                .findFirst()
+                .orElse(null);
+    }
+
+    private Nodo findNode(PoliticaDeNegocio politica, String nodeId) {
+        return politica.getNodos().stream()
+                .filter(node -> nodeId != null && nodeId.equals(node.getId()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private Nodo findStartNode(PoliticaDeNegocio politica) {
+        if (politica == null || politica.getNodos() == null) {
+            return null;
+        }
+
+        return politica.getNodos().stream()
+                .filter(node -> node.getTipo() == Nodo.TipoNodo.INICIO || node.getTipo() == Nodo.TipoNodo.START)
+                .findFirst()
+                .orElse(null);
+    }
+
+    private boolean isEndNode(Nodo node) {
+        return node != null && (node.getTipo() == Nodo.TipoNodo.FIN || node.getTipo() == Nodo.TipoNodo.END);
+    }
+
+    private LogActividad buildAutomaticLog(
+            Nodo node,
+            String usuario,
+            LocalDateTime fechaCompletado,
+            String informe,
+            List<CampoFormulario> campos,
+            Long duracionSegundos
+    ) {
+        LogActividad log = new LogActividad();
+        log.setNodoId(node.getId());
+        log.setNombreNodo(node.getNombre());
+        log.setUsuario(usuario);
+        log.setFechaCompletado(fechaCompletado);
+        log.setInformeIA(informe);
+        log.setDatosFormulario(campos);
+        log.setDuracionSegundos(duracionSegundos);
+        return log;
+    }
+
+    private void appendLogIfMissing(Tramite tramite, LogActividad log) {
+        boolean exists = tramite.getHistorial().stream()
+                .anyMatch(item -> log.getNodoId() != null && log.getNodoId().equals(item.getNodoId()));
+        if (!exists) {
+            tramite.getHistorial().add(log);
+        }
+    }
+
+    private CampoFormulario fieldValue(String nombre, String etiqueta, String tipo, String valor) {
+        CampoFormulario field = new CampoFormulario();
+        field.setNombre(nombre);
+        field.setEtiqueta(etiqueta);
+        field.setTipo(tipo);
+        field.setValor(valor);
+        return field;
     }
 }

@@ -22,6 +22,14 @@ services:
       - MONGODB_URI=${MONGODB_URI:?MONGODB_URI is required}
       - GROQ_API_KEY=${GROQ_API_KEY}
       - AI_PREDICTION_URL=http://ai-service:8001/predict
+      - FLOWABLE_DB_PATH=/app/data/flowable-db
+      - APP_UPLOAD_DIR=/app/uploads
+      - DEMO_RESET_TRAMITES_ENABLED=${DEMO_RESET_TRAMITES_ENABLED:-true}
+      - DEMO_BULK_TRAMITES_ENABLED=${DEMO_BULK_TRAMITES_ENABLED:-true}
+      - DEMO_BULK_TRAMITES_COUNT=${DEMO_BULK_TRAMITES_COUNT:-45}
+    volumes:
+      - backend_data:/app/data
+      - backend_uploads:/app/uploads
     depends_on:
       - ai-service
     restart: always
@@ -37,3 +45,5 @@ services:
 volumes:
   ai_models:
   ai_data:
+  backend_data:
+  backend_uploads:
