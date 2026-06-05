@@ -1,11 +1,11 @@
 import { AfterViewChecked, ChangeDetectorRef, Component, HostListener, OnDestroy, OnInit, inject } from '@angular/core';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Client } from '@stomp/stompjs';
 import SockJS from 'sockjs-client';
 import { AuthService } from '../../services/auth.service';
-import { Usuario, WorkflowService } from '../../services/workflow.service';
+import { Departamento as DepartamentoApi, Usuario, WorkflowService } from '../../services/workflow.service';
 
 type NodeType = 'INICIO' | 'ACTIVIDAD' | 'DECISION' | 'FORK' | 'JOIN' | 'FIN' | 'START' | 'ACTIVITY' | 'END';
 type FieldType = 'TEXTO' | 'NUMERO' | 'SELECCION' | 'FOTO' | 'ARCHIVO';
@@ -118,6 +118,19 @@ function getSpeechRecognitionCtor(): any {
           <div class="panel-title">
             <span>Componentes</span>
             <small>Arrastra al canvas</small>
+          </div>
+
+          <div class="library-section sample-selector">
+            <div class="section-heading">Muestras</div>
+            <select class="compact-input" [(ngModel)]="selectedPolicyId">
+              <option value="">Nuevo flujo con calles del sistema</option>
+              <option *ngFor="let policy of policies; trackBy: policyTrackBy" [value]="policy.id">
+                {{ policy.nombre }} - {{ policy.departamentos?.length || 0 }} calles
+              </option>
+            </select>
+            <button class="connection-toggle" type="button" (click)="openSelectedPolicy()">
+              {{ selectedPolicyId ? 'Abrir muestra' : 'Nuevo diseño' }}
+            </button>
           </div>
 
           <div class="palette-list">
@@ -1489,6 +1502,7 @@ export class DesignerComponent implements AfterViewChecked, OnInit, OnDestroy {
   private readonly authService = inject(AuthService);
   private readonly cdr = inject(ChangeDetectorRef);
   private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
 
   readonly nodeWidth = 250;
   readonly nodeMidY = 56;
@@ -1506,12 +1520,16 @@ export class DesignerComponent implements AfterViewChecked, OnInit, OnDestroy {
   ];
 
   policyId: string | null = null;
+  policies: any[] = [];
+  selectedPolicyId = '';
   policyName = 'Flujo de Prestamo Avanzado';
 
   departamentos: Departamento[] = [
-    { id: '1', nombre: 'Atencion al Cliente', funcionariosAsignados: [] },
-    { id: '2', nombre: 'Revision Tecnica / Riesgos', funcionariosAsignados: [] },
-    { id: '3', nombre: 'Direccion / Aprobacion', funcionariosAsignados: [] }
+    { id: 'd-atencion', nombre: 'Atencion al Cliente', funcionariosAsignados: ['Funcionario'] },
+    { id: 'd-riesgos', nombre: 'Riesgos Crediticios', funcionariosAsignados: ['Funcionario 2'] },
+    { id: 'd-aprobacion', nombre: 'Direccion General', funcionariosAsignados: ['Funcionario 3'] },
+    { id: 'd-tecnico', nombre: 'Revision Tecnica', funcionariosAsignados: ['Funcionario Tecnico'] },
+    { id: 'd-caja', nombre: 'Caja', funcionariosAsignados: ['Funcionario Caja'] }
   ];
 
   newDeptName = '';
@@ -1560,23 +1578,20 @@ export class DesignerComponent implements AfterViewChecked, OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.loadFuncionarios();
+    this.loadPolicies();
+    this.loadSystemDepartamentos();
 
     this.route.paramMap.subscribe(params => {
       this.policyId = params.get('id');
+      this.selectedPolicyId = this.policyId || '';
       if (this.policyId) {
-        this.workflowService.getPolicyById(this.policyId).subscribe(policy => {
-          if (policy) {
-            this.policyName = policy.nombre || 'Flujo sin nombre';
-            this.nodes = this.normalizeNodes(policy.nodos || []);
-            this.conexiones = policy.conexiones || [];
-            if (policy.departamentos && policy.departamentos.length > 0) {
-              this.departamentos = this.normalizeDepartamentos(policy.departamentos);
-              this.nodes = this.normalizeNodes(this.nodes);
-            }
-            this.scheduleRedraw();
-            this.connectWebSocket();
-          }
-        });
+        this.loadPolicy(this.policyId);
+      } else {
+        this.policyName = 'Nuevo flujo de trabajo';
+        this.nodes = [];
+        this.conexiones = [];
+        this.selectedNodeId = null;
+        this.scheduleRedraw();
       }
     });
   }
@@ -1600,6 +1615,62 @@ export class DesignerComponent implements AfterViewChecked, OnInit, OnDestroy {
 
   @HostListener('window:resize')
   onResize(): void {
+    this.scheduleRedraw();
+  }
+
+  loadPolicies(): void {
+    this.workflowService.getPolicies().subscribe({
+      next: policies => {
+        this.policies = policies || [];
+      },
+      error: () => {
+        this.policies = [];
+      }
+    });
+  }
+
+  loadSystemDepartamentos(): void {
+    this.workflowService.getDepartamentos().subscribe({
+      next: departamentos => {
+        if (this.policyId || !departamentos?.length) return;
+        this.departamentos = this.normalizeSystemDepartamentos(departamentos);
+        this.scheduleRedraw();
+      },
+      error: () => {
+        this.scheduleRedraw();
+      }
+    });
+  }
+
+  loadPolicy(policyId: string): void {
+    this.workflowService.getPolicyById(policyId).subscribe(policy => {
+      if (policy) {
+        this.policyName = policy.nombre || 'Flujo sin nombre';
+        if (policy.departamentos && policy.departamentos.length > 0) {
+          this.departamentos = this.normalizeDepartamentos(policy.departamentos);
+        }
+        this.nodes = this.normalizeNodes(policy.nodos || []);
+        this.conexiones = policy.conexiones || [];
+        this.selectedNodeId = null;
+        this.scheduleRedraw();
+        this.connectWebSocket();
+      }
+    });
+  }
+
+  openSelectedPolicy(): void {
+    if (this.selectedPolicyId) {
+      this.router.navigate(['/designer', this.selectedPolicyId]);
+      return;
+    }
+
+    this.router.navigate(['/designer']);
+    this.policyId = null;
+    this.policyName = 'Nuevo flujo de trabajo';
+    this.nodes = [];
+    this.conexiones = [];
+    this.selectedNodeId = null;
+    this.loadSystemDepartamentos();
     this.scheduleRedraw();
   }
 
@@ -1940,9 +2011,15 @@ export class DesignerComponent implements AfterViewChecked, OnInit, OnDestroy {
       next: usuarios => {
         const funcionarios = usuarios.filter(usuario => usuario.rol === 'FUNCIONARIO');
         this.availableFuncionarios = funcionarios.length > 0 ? funcionarios : this.defaultFuncionarios();
+        if (!this.policyId) {
+          this.departamentos = this.withSystemAssignees(this.departamentos);
+        }
       },
       error: () => {
         this.availableFuncionarios = this.defaultFuncionarios();
+        if (!this.policyId) {
+          this.departamentos = this.withSystemAssignees(this.departamentos);
+        }
       }
     });
   }
@@ -2353,6 +2430,10 @@ export class DesignerComponent implements AfterViewChecked, OnInit, OnDestroy {
     return usuario.id || usuario.username;
   }
 
+  policyTrackBy(_: number, policy: any): string {
+    return policy.id || policy.nombre;
+  }
+
   messageTrackBy(index: number): number {
     return index;
   }
@@ -2391,6 +2472,29 @@ export class DesignerComponent implements AfterViewChecked, OnInit, OnDestroy {
       nombre: departamento.nombre || 'Calle sin nombre',
       funcionariosAsignados: departamento.funcionariosAsignados || []
     }));
+  }
+
+  private normalizeSystemDepartamentos(departamentos: DepartamentoApi[]): Departamento[] {
+    return this.withSystemAssignees(
+      departamentos.map((departamento, index) => ({
+        id: departamento.id || 'dept-' + index,
+        nombre: departamento.nombre || 'Calle sin nombre',
+        funcionariosAsignados: []
+      }))
+    );
+  }
+
+  private withSystemAssignees(departamentos: Departamento[]): Departamento[] {
+    return departamentos.map(departamento => {
+      const assigned = this.availableFuncionarios
+        .filter(funcionario => funcionario.departamentoId === departamento.id)
+        .map(funcionario => funcionario.username);
+
+      return {
+        ...departamento,
+        funcionariosAsignados: assigned.length ? assigned : (departamento.funcionariosAsignados || [])
+      };
+    });
   }
 
   private resolveNodePosition(x?: number, y?: number): { x: number; y: number } {

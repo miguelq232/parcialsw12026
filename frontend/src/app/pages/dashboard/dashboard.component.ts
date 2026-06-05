@@ -83,8 +83,8 @@ import { Router } from '@angular/router';
             <ng-template #emptyState>
               <div class="empty-state">
                 <h3>No hay politicas creadas</h3>
-                <p>Abre el disenador para construir el primer flujo de trabajo.</p>
-                <button type="button" class="primary-action" *ngIf="auth.isAdmin()" (click)="crearPolitica()">Ir al disenador</button>
+                <p>Abre el diseño para construir el primer flujo de trabajo.</p>
+                <button type="button" class="primary-action" *ngIf="auth.isAdmin()" (click)="crearPolitica()">Ir a diseño</button>
               </div>
             </ng-template>
           </div>

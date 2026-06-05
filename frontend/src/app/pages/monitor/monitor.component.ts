@@ -841,6 +841,59 @@ function getSpeechRecognitionCtor(): any {
       color: #cbd5e1 !important;
     }
 
+    .modal-content div[style*="border-bottom: 1px solid #f1f5f9"] {
+      border-bottom-color: #33343a !important;
+    }
+
+    .modal-content div[style*="color: #94a3b8"],
+    .modal-content p[style*="color: var(--text-muted)"],
+    .modal-content span[style*="color: #64748b"],
+    .step-dept {
+      color: #a8b0bd !important;
+    }
+
+    .modal-content h3[style*="color: #1e293b"],
+    .modal-content h4[style*="color: #1e293b"],
+    .modal-content span[style*="color: #1e293b"],
+    .step-name,
+    .history-field-label,
+    .history-plain-value,
+    .history-document-preview strong {
+      color: #f3f4f6 !important;
+    }
+
+    .history-field,
+    .history-image-preview,
+    .history-pdf-preview,
+    .history-document-preview,
+    .file-field,
+    .voice-transcript {
+      background: #18191d !important;
+      border-color: #34353c !important;
+      color: #e5e7eb !important;
+    }
+
+    .history-file-type,
+    .history-document-preview span,
+    .file-field small,
+    .voice-fill-panel small {
+      color: #a8b0bd !important;
+    }
+
+    .history-file-header a,
+    .file-field a {
+      color: #93c5fd !important;
+    }
+
+    .report-area textarea,
+    .modal-content input[type="text"],
+    .modal-content input[type="number"],
+    .modal-content input[type="file"] {
+      background: #111113 !important;
+      border-color: #3f4652 !important;
+      color: #f9fafb !important;
+    }
+
     @media (max-width: 900px) {
       .monitor-container {
         padding: 16px !important;

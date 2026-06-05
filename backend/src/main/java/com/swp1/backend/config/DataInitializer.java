@@ -978,7 +978,9 @@ public class DataInitializer {
         policy.setDepartamentos(List.of(
                 deptMap("d-atencion", "Atencion al Cliente", List.of("Funcionario")),
                 deptMap("d-riesgos", "Riesgos Crediticios", List.of("Funcionario 2")),
-                deptMap("d-aprobacion", "Aprobacion Gerencial", List.of("Funcionario 3"))
+                deptMap("d-aprobacion", "Aprobacion Gerencial", List.of("Funcionario 3")),
+                deptMap("d-tecnico", "Revision Tecnica", List.of("Funcionario Tecnico")),
+                deptMap("d-caja", "Caja", List.of("Funcionario Caja"))
         ));
         policy.setNodos(List.of(
                 node("prestamo-inicio", Nodo.TipoNodo.INICIO, "Inicio", "d-atencion", List.of(), List.of(), 80, 120),
@@ -1020,8 +1022,10 @@ public class DataInitializer {
         policy.setDescripcion("Flujo de ejemplo para reclamos, inspeccion tecnica, compensacion y cierre.");
         policy.setDepartamentos(List.of(
                 deptMap("d-atencion", "Recepcion de Reclamos", List.of("Funcionario")),
+                deptMap("d-riesgos", "Riesgos Crediticios", List.of("Funcionario 2")),
                 deptMap("d-tecnico", "Revision Tecnica", List.of("Funcionario Tecnico")),
-                deptMap("d-aprobacion", "Comunicacion y Cierre", List.of("Funcionario 3"))
+                deptMap("d-aprobacion", "Comunicacion y Cierre", List.of("Funcionario 3")),
+                deptMap("d-caja", "Caja", List.of("Funcionario Caja"))
         ));
         policy.setNodos(List.of(
                 node("reclamo-inicio", Nodo.TipoNodo.INICIO, "Inicio", "d-atencion", List.of(), List.of(), 80, 120),
@@ -1061,7 +1065,9 @@ public class DataInitializer {
         policy.setDescripcion("Flujo de ejemplo con carga de licencia antigua, foto, certificado medico y comprobantes.");
         policy.setDepartamentos(List.of(
                 deptMap("d-atencion", "Recepcion de Documentos", List.of("Funcionario")),
+                deptMap("d-riesgos", "Riesgos Crediticios", List.of("Funcionario 2")),
                 deptMap("d-tecnico", "Validacion Documental", List.of("Funcionario Tecnico")),
+                deptMap("d-aprobacion", "Direccion General", List.of("Funcionario 3")),
                 deptMap("d-caja", "Caja y Entrega", List.of("Funcionario Caja"))
         ));
         policy.setNodos(List.of(
@@ -1113,7 +1119,8 @@ public class DataInitializer {
                 "Riesgos Crediticios",
                 "Direccion General",
                 "Revision Tecnica",
-                "Caja"
+                "Caja",
+                "TI"
         );
         repository.findAll().stream()
                 .filter(departamento -> departamento.getId() != null && !fixedIds.contains(departamento.getId()))

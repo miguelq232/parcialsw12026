@@ -28,6 +28,12 @@ export interface Usuario {
   departamentoId?: string;
 }
 
+export interface Departamento {
+  id?: string;
+  nombre: string;
+  descripcion?: string;
+}
+
 @Injectable({
   providedIn: 'root'
 })
@@ -49,6 +55,10 @@ export class WorkflowService {
 
   getUsuarios(): Observable<Usuario[]> {
     return this.http.get<Usuario[]>(`${this.apiUrl}/usuarios`);
+  }
+
+  getDepartamentos(): Observable<Departamento[]> {
+    return this.http.get<Departamento[]>(`${this.apiUrl}/departamentos`);
   }
 
   getTramites(): Observable<any[]> {

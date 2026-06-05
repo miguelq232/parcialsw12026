@@ -16,7 +16,7 @@ import { AuthService } from '../../services/auth.service';
 
       <nav>
         <a routerLink="/dashboard" routerLinkActive="active">Dashboard</a>
-        <a *ngIf="auth.isAdmin()" routerLink="/designer" routerLinkActive="active">Disenador</a>
+        <a *ngIf="auth.isAdmin()" routerLink="/designer" routerLinkActive="active">Diseño</a>
         <a *ngIf="auth.isFuncionario()" routerLink="/monitor" routerLinkActive="active">Monitor</a>
         <a routerLink="/reportes" routerLinkActive="active">Reportes</a>
       </nav>
