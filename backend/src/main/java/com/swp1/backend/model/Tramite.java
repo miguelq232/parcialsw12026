@@ -16,6 +16,7 @@ public class Tramite {
     private String cliente;
     private LocalDateTime fechaInicio;
     private List<LogActividad> historial;
+    private List<CambioTramite> historialCambios;
 
     // Getters and Setters
     public String getId() { return id; }
@@ -34,4 +35,6 @@ public class Tramite {
     public void setFechaInicio(LocalDateTime fechaInicio) { this.fechaInicio = fechaInicio; }
     public List<LogActividad> getHistorial() { return historial; }
     public void setHistorial(List<LogActividad> historial) { this.historial = historial; }
+    public List<CambioTramite> getHistorialCambios() { return historialCambios; }
+    public void setHistorialCambios(List<CambioTramite> historialCambios) { this.historialCambios = historialCambios; }
 }

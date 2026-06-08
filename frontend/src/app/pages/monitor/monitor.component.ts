@@ -273,39 +273,87 @@ function getSpeechRecognitionCtor(): any {
                 <div *ngIf="!selectedTramite.historial || selectedTramite.historial.length === 0" style="text-align: center; color: #94a3b8; font-size: 0.813rem; padding: 24px 0;">
                   No hay datos registrados aún.
                 </div>
-                <div *ngFor="let log of selectedTramite.historial" style="background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; margin-top: 8px;">
+                <div *ngFor="let log of selectedTramite.historial; let i = index" style="background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; margin-top: 8px;">
                   <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #f1f5f9; padding-bottom: 6px; margin-bottom: 8px;">
                     <h4 style="margin: 0; font-size: 0.875rem; color: #1e293b;">{{ log.nombreNodo }}</h4>
-                    <span style="font-size: 0.75rem; color: #64748b;">{{ log.fechaCompletado | date:'dd/MM HH:mm' }}</span>
+                    <div class="history-actions">
+                      <span style="font-size: 0.75rem; color: #64748b;">{{ log.fechaCompletado | date:'dd/MM HH:mm' }}</span>
+                      <button *ngIf="canEditLog(log) && !isEditingLog(i)" type="button" class="history-edit-button" (click)="startEditLog(i, log)">Editar</button>
+                      <button *ngIf="isEditingLog(i)" type="button" class="history-edit-button secondary" (click)="cancelEditLog()">Cancelar</button>
+                    </div>
                   </div>
                   <div class="history-meta">
                     <span>Funcionario: {{ log.usuario || 'Sin funcionario' }}</span>
                     <span>Tiempo: {{ formatDuration(log.duracionSegundos) }}</span>
                   </div>
-                  <div *ngIf="log.datosFormulario?.length" class="history-fields">
-                    <div *ngFor="let c of log.datosFormulario" class="history-field" [class.with-preview]="c.archivoUrl">
+                  <div *ngIf="getHistoryFields(log, i).length" class="history-fields">
+                    <div *ngFor="let c of getHistoryFields(log, i)" class="history-field" [class.with-preview]="c.archivoUrl || isEditingLog(i)">
                       <span class="history-field-label">{{ c.etiqueta }}:</span>
-                      <ng-container *ngIf="c.archivoUrl; else plainValue">
-                        <div class="history-file-header">
-                          <span class="history-file-type">{{ getFileTypeLabel(c) }}</span>
-                          <a [href]="getFileUrl(c.archivoUrl)" target="_blank">{{ c.archivoNombre || 'Abrir archivo' }}</a>
-                        </div>
-                        <img *ngIf="isImageFile(c)" class="history-image-preview" [src]="getFileUrl(c.archivoUrl)" [alt]="c.archivoNombre || c.etiqueta">
-                        <iframe *ngIf="isPdfFile(c)" class="history-pdf-preview" [src]="getSafeFileUrl(c)" title="Vista previa PDF"></iframe>
-                        <div *ngIf="!isImageFile(c) && !isPdfFile(c)" class="history-document-preview">
-                          <strong>{{ c.archivoNombre || c.valor || 'Documento adjunto' }}</strong>
-                          <span>{{ c.archivoTipo || 'Archivo adjunto' }}</span>
-                        </div>
+                      <ng-container *ngIf="isEditingLog(i); else readOnlyField">
+                        <ng-container [ngSwitch]="c.tipo">
+                          <select *ngSwitchCase="'SELECCION'" [(ngModel)]="c.valor" class="minimal-input">
+                            <option *ngFor="let opt of c.opciones || []" [value]="opt">{{ opt }}</option>
+                          </select>
+                          <div *ngSwitchCase="'FOTO'" class="file-field">
+                            <input type="file" accept="image/*" class="minimal-input" (change)="uploadEditedCampoFile(c, $event)">
+                            <a *ngIf="c.archivoUrl" [href]="getFileUrl(c.archivoUrl)" target="_blank">{{ c.archivoNombre || 'Ver imagen cargada' }}</a>
+                            <img *ngIf="isImageFile(c)" class="upload-image-preview" [src]="getFileUrl(c.archivoUrl)" [alt]="c.archivoNombre || c.etiqueta">
+                            <small *ngIf="c.uploading">Subiendo archivo...</small>
+                          </div>
+                          <div *ngSwitchCase="'ARCHIVO'" class="file-field">
+                            <input type="file" [accept]="documentAccept" class="minimal-input" (change)="uploadEditedCampoFile(c, $event)">
+                            <a *ngIf="c.archivoUrl" [href]="getFileUrl(c.archivoUrl)" target="_blank">{{ c.archivoNombre || 'Ver documento cargado' }}</a>
+                            <small *ngIf="c.uploading">Subiendo archivo...</small>
+                          </div>
+                          <input *ngSwitchCase="'NUMERO'" type="number" [(ngModel)]="c.valor" class="minimal-input">
+                          <input *ngSwitchDefault type="text" [(ngModel)]="c.valor" class="minimal-input">
+                        </ng-container>
                       </ng-container>
-                      <ng-template #plainValue>
-                        <span class="history-plain-value">{{ c.valor || 'N/A' }}</span>
+                      <ng-template #readOnlyField>
+                        <ng-container *ngIf="c.archivoUrl; else plainValue">
+                          <div class="history-file-header">
+                            <span class="history-file-type">{{ getFileTypeLabel(c) }}</span>
+                            <a [href]="getFileUrl(c.archivoUrl)" target="_blank">{{ c.archivoNombre || 'Abrir archivo' }}</a>
+                          </div>
+                          <img *ngIf="isImageFile(c)" class="history-image-preview" [src]="getFileUrl(c.archivoUrl)" [alt]="c.archivoNombre || c.etiqueta">
+                          <iframe *ngIf="isPdfFile(c)" class="history-pdf-preview" [src]="getSafeFileUrl(c)" title="Vista previa PDF"></iframe>
+                          <div *ngIf="!isImageFile(c) && !isPdfFile(c)" class="history-document-preview">
+                            <strong>{{ c.archivoNombre || c.valor || 'Documento adjunto' }}</strong>
+                            <span>{{ c.archivoTipo || 'Archivo adjunto' }}</span>
+                          </div>
+                        </ng-container>
+                        <ng-template #plainValue>
+                          <span class="history-plain-value">{{ c.valor || 'N/A' }}</span>
+                        </ng-template>
                       </ng-template>
                     </div>
                   </div>
-                  <div *ngIf="log.informeIA" style="margin-top: 8px; padding: 8px; background: #fffbeb; border: 1px dashed #fcd34d; border-radius: 6px;">
+                  <div *ngIf="isEditingLog(i)" class="edit-report-area">
+                    <label>Informe/Observaciones:</label>
+                    <textarea [(ngModel)]="editingLog.informeIA"></textarea>
+                    <button type="button" class="voice-fill-button" [disabled]="editHasPendingUploads()" (click)="saveEditedLog()">Guardar cambios</button>
+                  </div>
+                  <div *ngIf="!isEditingLog(i) && log.informeIA" style="margin-top: 8px; padding: 8px; background: #fffbeb; border: 1px dashed #fcd34d; border-radius: 6px;">
                     <span style="font-size: 0.75rem; font-weight: 700; color: #d97706;">Informe:</span>
                     <p style="font-size: 0.813rem; color: #451a03; margin: 4px 0 0 0; font-style: italic;">{{ log.informeIA }}</p>
                   </div>
+                </div>
+              </div>
+
+              <div class="modal-section">
+                <h4 class="section-title">Historial de Cambios</h4>
+                <div *ngIf="!selectedTramite.historialCambios || selectedTramite.historialCambios.length === 0" style="text-align: center; color: #94a3b8; font-size: 0.813rem; padding: 16px 0;">
+                  No hay cambios registrados.
+                </div>
+                <div *ngFor="let cambio of selectedTramite.historialCambios" class="change-log-item">
+                  <div>
+                    <strong>{{ cambio.etiqueta || cambio.campoNombre }}</strong>
+                    <span>{{ cambio.nombreNodo }} / {{ cambio.usuario || 'Sin funcionario' }} / {{ cambio.fechaCambio | date:'dd/MM HH:mm' }}</span>
+                  </div>
+                  <p>
+                    <span>Antes: {{ getCambioAnterior(cambio) }}</span>
+                    <span>Ahora: {{ getCambioNuevo(cambio) }}</span>
+                  </p>
                 </div>
               </div>
 
@@ -436,6 +484,28 @@ function getSpeechRecognitionCtor(): any {
       border-radius: 4px;
       padding: 3px 6px;
     }
+    .history-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .history-edit-button {
+      border: 1px solid #fb923c;
+      background: #fff7ed;
+      color: #9a3412;
+      border-radius: 4px;
+      padding: 4px 8px;
+      font-size: 0.7rem;
+      font-weight: 800;
+      cursor: pointer;
+    }
+    .history-edit-button.secondary {
+      border-color: #cbd5e1;
+      background: #f8fafc;
+      color: #475569;
+    }
     .history-field.with-preview {
       grid-column: span 2;
     }
@@ -490,6 +560,50 @@ function getSpeechRecognitionCtor(): any {
       display: grid;
       gap: 4px;
       padding: 12px;
+    }
+    .edit-report-area {
+      display: grid;
+      gap: 8px;
+      margin-top: 10px;
+      padding: 10px;
+      border: 1px dashed #fb923c;
+      border-radius: 6px;
+      background: #fff7ed;
+    }
+    .edit-report-area label {
+      font-size: 0.75rem;
+      font-weight: 800;
+      color: #9a3412;
+    }
+    .edit-report-area textarea {
+      min-height: 90px;
+      background: white;
+    }
+    .change-log-item {
+      display: grid;
+      gap: 6px;
+      background: white;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 10px;
+      margin-top: 8px;
+    }
+    .change-log-item div {
+      display: grid;
+      gap: 2px;
+    }
+    .change-log-item strong {
+      color: #1e293b;
+      font-size: 0.82rem;
+    }
+    .change-log-item span {
+      color: #64748b;
+      font-size: 0.74rem;
+    }
+    .change-log-item p {
+      display: grid;
+      gap: 4px;
+      margin: 0;
     }
     .report-area { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
     .report-area label { font-size: 0.75rem; color: var(--text-muted); }
@@ -939,6 +1053,8 @@ export class MonitorComponent implements OnInit, OnDestroy {
   private shouldProcessVoiceOnEnd = false;
   private voiceRestartAttempts = 0;
   private safeFileUrlCache = new Map<string, SafeResourceUrl>();
+  editingLogIndex: number | null = null;
+  editingLog: any = null;
 
   openModal() {
     this.showModal = true;
@@ -946,6 +1062,7 @@ export class MonitorComponent implements OnInit, OnDestroy {
 
   closeModal() {
     this.showModal = false;
+    this.cancelEditLog();
   }
 
   policies: any[] = [];
@@ -1007,6 +1124,7 @@ export class MonitorComponent implements OnInit, OnDestroy {
     this.predictionError = '';
     this.isLoadingPrediction = false;
     this.policyNodes = [];
+    this.cancelEditLog();
     
     this.workflowService.getPolicies().subscribe(policies => {
       this.policies = policies;
@@ -1117,6 +1235,119 @@ export class MonitorComponent implements OnInit, OnDestroy {
     }
 
     return assignees.some(assignee => this.normalizeText(assignee) === username);
+  }
+
+  canEditLog(log: any): boolean {
+    if (!log) return false;
+    if (this.auth.isAdmin()) return true;
+    if (this.normalizeText(log.usuario) === 'sistema') return false;
+
+    const currentUser = this.auth.currentUser();
+    if (this.normalizeText(log.usuario) === this.normalizeText(currentUser?.username || '')) {
+      return true;
+    }
+
+    const node = this.policyNodes.find((item: any) => item.id === log.nodoId);
+    return this.canCurrentUserWorkOnNode(node, this.selectedPolicy);
+  }
+
+  isEditingLog(index: number): boolean {
+    return this.editingLogIndex === index && !!this.editingLog;
+  }
+
+  getHistoryFields(log: any, index: number): any[] {
+    if (this.isEditingLog(index)) {
+      return this.editingLog?.datosFormulario || [];
+    }
+    return log?.datosFormulario || [];
+  }
+
+  startEditLog(index: number, log: any) {
+    this.editingLogIndex = index;
+    this.editingLog = JSON.parse(JSON.stringify(log || {}));
+    this.editingLog.datosFormulario = (this.editingLog.datosFormulario || []).map((campo: any) => {
+      const definition = this.findCampoDefinition(log.nodoId, campo);
+      return {
+        ...definition,
+        ...campo,
+        opciones: campo.opciones || definition?.opciones || []
+      };
+    });
+  }
+
+  cancelEditLog() {
+    this.editingLogIndex = null;
+    this.editingLog = null;
+  }
+
+  saveEditedLog() {
+    if (this.editingLogIndex === null || !this.selectedTramite?.id || !this.editingLog) return;
+    if (this.editHasPendingUploads()) {
+      alert('Espera a que terminen de subir los archivos.');
+      return;
+    }
+
+    const currentUser = this.auth.currentUser();
+    const payload = {
+      campos: this.editingLog.datosFormulario || [],
+      informeIA: this.editingLog.informeIA || '',
+      usuario: currentUser?.username || 'Funcionario',
+      rol: currentUser?.role || '',
+      departamentoId: currentUser?.departamentoId || ''
+    };
+
+    this.workflowService.editarHistorialTramite(this.selectedTramite.id, this.editingLogIndex, payload).subscribe({
+      next: updated => {
+        this.selectedTramite = updated;
+        this.tramites = this.tramites.map(item => item.id === updated.id ? updated : item);
+        this.cancelEditLog();
+      },
+      error: err => {
+        alert(err.error?.error || 'No se pudo editar el historial.');
+      }
+    });
+  }
+
+  uploadEditedCampoFile(campo: any, event: Event) {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+
+    campo.uploading = true;
+    this.workflowService.uploadFile(file).subscribe({
+      next: response => {
+        campo.archivoNombre = response.archivoNombre;
+        campo.archivoTipo = response.archivoTipo;
+        campo.archivoUrl = response.archivoUrl;
+        campo.valor = response.archivoNombre;
+        campo.uploading = false;
+      },
+      error: err => {
+        campo.uploading = false;
+        input.value = '';
+        alert(err.error?.error || 'No se pudo subir el archivo.');
+      }
+    });
+  }
+
+  editHasPendingUploads(): boolean {
+    return (this.editingLog?.datosFormulario || []).some((campo: any) => campo.uploading);
+  }
+
+  getCambioAnterior(cambio: any): string {
+    return cambio?.archivoNombreAnterior || cambio?.valorAnterior || 'Sin valor';
+  }
+
+  getCambioNuevo(cambio: any): string {
+    return cambio?.archivoNombreNuevo || cambio?.valorNuevo || 'Sin valor';
+  }
+
+  private findCampoDefinition(nodoId: string, campo: any): any {
+    const node = this.policyNodes.find((item: any) => item.id === nodoId);
+    const fields = node?.campos || [];
+    const byName = fields.find((item: any) => item.nombre && item.nombre === campo?.nombre);
+    if (byName) return byName;
+    return fields.find((item: any) => this.normalizeText(item.etiqueta) === this.normalizeText(campo?.etiqueta || '')) || {};
   }
 
   getAssignmentLabel(node: any, policy?: any): string {

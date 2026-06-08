@@ -73,6 +73,10 @@ export class WorkflowService {
     return this.http.post<any>(`${this.apiUrl}/tramites/${tramiteId}/completar`, { nodoId, datos });
   }
 
+  editarHistorialTramite(tramiteId: string, index: number, datos: any): Observable<any> {
+    return this.http.put<any>(`${this.apiUrl}/tramites/${tramiteId}/historial/${index}`, datos);
+  }
+
   uploadFile(file: File): Observable<any> {
     const formData = new FormData();
     formData.append('file', file);

@@ -1,5 +1,6 @@
 package com.swp1.backend.controller;
 
+import com.swp1.backend.model.CambioTramite;
 import com.swp1.backend.model.LogActividad;
 import com.swp1.backend.model.CampoFormulario;
 import com.swp1.backend.model.Conexion;
@@ -10,10 +11,13 @@ import com.swp1.backend.repository.TramiteRepository;
 import com.swp1.backend.service.WorkflowEngineService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
+import java.text.Normalizer;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Objects;
 
 @RestController
@@ -177,18 +181,7 @@ public class TramiteController {
 
             List<com.swp1.backend.model.CampoFormulario> campos = new java.util.ArrayList<>();
             if(camposMap != null) {
-                for(Map<String, Object> cmap : camposMap) {
-                    com.swp1.backend.model.CampoFormulario cf = new com.swp1.backend.model.CampoFormulario();
-                    cf.setNombre((String) cmap.get("nombre"));
-                    cf.setEtiqueta((String) cmap.get("etiqueta"));
-                    cf.setTipo((String) cmap.get("tipo"));
-                    Object valorObj = cmap.get("valor");
-                    cf.setValor(valorObj != null ? String.valueOf(valorObj) : "");
-                    cf.setArchivoNombre((String) cmap.get("archivoNombre"));
-                    cf.setArchivoTipo((String) cmap.get("archivoTipo"));
-                    cf.setArchivoUrl((String) cmap.get("archivoUrl"));
-                    campos.add(cf);
-                }
+                campos = buildCamposFromMaps(camposMap);
             }
             log.setDatosFormulario(campos);
 
@@ -215,6 +208,230 @@ public class TramiteController {
             return org.springframework.http.ResponseEntity.status(500)
                 .body(java.util.Map.of("error", "Error al completar tarea: " + e.getMessage()));
         }
+    }
+
+    @PutMapping("/{id}/historial/{index}")
+    public org.springframework.http.ResponseEntity<?> editarHistorial(
+            @PathVariable String id,
+            @PathVariable int index,
+            @RequestBody Map<String, Object> payload
+    ) {
+        try {
+            Tramite tramite = tramiteRepository.findById(id).orElseThrow();
+            if (tramite.getHistorial() == null || index < 0 || index >= tramite.getHistorial().size()) {
+                return org.springframework.http.ResponseEntity.status(404)
+                        .body(java.util.Map.of("error", "Registro de historial no encontrado."));
+            }
+
+            LogActividad log = tramite.getHistorial().get(index);
+            PoliticaDeNegocio politica = politicaRepository.findById(tramite.getPoliticaId()).orElse(null);
+            if (!canEditLog(politica, log, payload)) {
+                return org.springframework.http.ResponseEntity.status(403)
+                        .body(java.util.Map.of("error", "No puedes editar este registro. Solo el funcionario responsable, el funcionario que lo registro o un administrador pueden modificarlo."));
+            }
+
+            String usuario = stringValue(payload.getOrDefault("usuario", "Funcionario"));
+            List<Map<String, Object>> camposMap = (List<Map<String, Object>>) payload.get("campos");
+            List<CampoFormulario> nuevosCampos = camposMap != null
+                    ? buildCamposFromMaps(camposMap)
+                    : new java.util.ArrayList<>(log.getDatosFormulario() != null ? log.getDatosFormulario() : List.of());
+            String nuevoInforme = stringValue(payload.get("informeIA"));
+
+            List<CambioTramite> cambios = buildCambios(log, nuevosCampos, nuevoInforme, usuario);
+            if (cambios.isEmpty()) {
+                return org.springframework.http.ResponseEntity.ok(tramite);
+            }
+
+            log.setDatosFormulario(nuevosCampos);
+            log.setInformeIA(nuevoInforme);
+
+            if (tramite.getHistorialCambios() == null) {
+                tramite.setHistorialCambios(new java.util.ArrayList<>());
+            }
+            tramite.getHistorialCambios().addAll(cambios);
+
+            return org.springframework.http.ResponseEntity.ok(tramiteRepository.save(tramite));
+        } catch (Exception e) {
+            e.printStackTrace();
+            return org.springframework.http.ResponseEntity.status(500)
+                    .body(java.util.Map.of("error", "Error al editar historial: " + e.getMessage()));
+        }
+    }
+
+    private List<CampoFormulario> buildCamposFromMaps(List<Map<String, Object>> camposMap) {
+        List<CampoFormulario> campos = new java.util.ArrayList<>();
+        for (Map<String, Object> cmap : camposMap) {
+            CampoFormulario cf = new CampoFormulario();
+            cf.setNombre(stringValue(cmap.get("nombre")));
+            cf.setEtiqueta(stringValue(cmap.get("etiqueta")));
+            cf.setTipo(stringValue(cmap.get("tipo")));
+            Object valorObj = cmap.get("valor");
+            cf.setValor(valorObj != null ? String.valueOf(valorObj) : "");
+            cf.setArchivoNombre(stringValue(cmap.get("archivoNombre")));
+            cf.setArchivoTipo(stringValue(cmap.get("archivoTipo")));
+            cf.setArchivoUrl(stringValue(cmap.get("archivoUrl")));
+            Object opcionesObj = cmap.get("opciones");
+            if (opcionesObj instanceof List<?> opciones) {
+                cf.setOpciones(opciones.stream().map(String::valueOf).toList());
+            }
+            campos.add(cf);
+        }
+        return campos;
+    }
+
+    private List<CambioTramite> buildCambios(
+            LogActividad log,
+            List<CampoFormulario> nuevosCampos,
+            String nuevoInforme,
+            String usuario
+    ) {
+        List<CambioTramite> cambios = new java.util.ArrayList<>();
+        List<CampoFormulario> anteriores = log.getDatosFormulario() != null ? log.getDatosFormulario() : List.of();
+        Map<String, CampoFormulario> anterioresPorClave = new LinkedHashMap<>();
+        Map<String, CampoFormulario> nuevosPorClave = new LinkedHashMap<>();
+
+        for (int i = 0; i < anteriores.size(); i++) {
+            anterioresPorClave.put(fieldKey(anteriores.get(i), i), anteriores.get(i));
+        }
+        for (int i = 0; i < nuevosCampos.size(); i++) {
+            nuevosPorClave.put(fieldKey(nuevosCampos.get(i), i), nuevosCampos.get(i));
+        }
+
+        java.util.LinkedHashSet<String> keys = new java.util.LinkedHashSet<>();
+        keys.addAll(anterioresPorClave.keySet());
+        keys.addAll(nuevosPorClave.keySet());
+
+        for (String key : keys) {
+            CampoFormulario anterior = anterioresPorClave.get(key);
+            CampoFormulario nuevo = nuevosPorClave.get(key);
+            if (!fieldChanged(anterior, nuevo)) {
+                continue;
+            }
+            CampoFormulario ref = nuevo != null ? nuevo : anterior;
+            CambioTramite cambio = baseCambio(log, usuario);
+            cambio.setCampoNombre(ref != null ? ref.getNombre() : key);
+            cambio.setEtiqueta(ref != null ? ref.getEtiqueta() : key);
+            cambio.setTipo(ref != null ? ref.getTipo() : null);
+            cambio.setValorAnterior(anterior != null ? anterior.getValor() : null);
+            cambio.setValorNuevo(nuevo != null ? nuevo.getValor() : null);
+            cambio.setArchivoNombreAnterior(anterior != null ? anterior.getArchivoNombre() : null);
+            cambio.setArchivoNombreNuevo(nuevo != null ? nuevo.getArchivoNombre() : null);
+            cambio.setArchivoUrlAnterior(anterior != null ? anterior.getArchivoUrl() : null);
+            cambio.setArchivoUrlNuevo(nuevo != null ? nuevo.getArchivoUrl() : null);
+            cambios.add(cambio);
+        }
+
+        if (!Objects.equals(emptyToNull(log.getInformeIA()), emptyToNull(nuevoInforme))) {
+            CambioTramite cambio = baseCambio(log, usuario);
+            cambio.setCampoNombre("informeIA");
+            cambio.setEtiqueta("Informe/Observaciones");
+            cambio.setTipo("AREA_TEXTO");
+            cambio.setValorAnterior(log.getInformeIA());
+            cambio.setValorNuevo(nuevoInforme);
+            cambios.add(cambio);
+        }
+
+        return cambios;
+    }
+
+    private CambioTramite baseCambio(LogActividad log, String usuario) {
+        CambioTramite cambio = new CambioTramite();
+        cambio.setFechaCambio(LocalDateTime.now());
+        cambio.setUsuario(usuario);
+        cambio.setNodoId(log.getNodoId());
+        cambio.setNombreNodo(log.getNombreNodo());
+        return cambio;
+    }
+
+    private boolean fieldChanged(CampoFormulario anterior, CampoFormulario nuevo) {
+        if (anterior == null || nuevo == null) {
+            return anterior != nuevo;
+        }
+
+        return !Objects.equals(emptyToNull(anterior.getValor()), emptyToNull(nuevo.getValor()))
+                || !Objects.equals(emptyToNull(anterior.getArchivoNombre()), emptyToNull(nuevo.getArchivoNombre()))
+                || !Objects.equals(emptyToNull(anterior.getArchivoTipo()), emptyToNull(nuevo.getArchivoTipo()))
+                || !Objects.equals(emptyToNull(anterior.getArchivoUrl()), emptyToNull(nuevo.getArchivoUrl()));
+    }
+
+    private String fieldKey(CampoFormulario campo, int index) {
+        if (campo == null) {
+            return "idx-" + index;
+        }
+        if (!isBlank(campo.getNombre())) {
+            return "nombre:" + campo.getNombre();
+        }
+        if (!isBlank(campo.getEtiqueta())) {
+            return "etiqueta:" + campo.getEtiqueta();
+        }
+        return "idx-" + index;
+    }
+
+    private boolean canEditLog(PoliticaDeNegocio politica, LogActividad log, Map<String, Object> payload) {
+        String rol = stringValue(payload.get("rol"));
+        if ("ADMIN".equalsIgnoreCase(rol)) {
+            return true;
+        }
+
+        if (log == null || isBlank(log.getNodoId()) || "Sistema".equalsIgnoreCase(log.getUsuario())) {
+            return false;
+        }
+
+        String usuario = normalize(stringValue(payload.get("usuario")));
+        if (!isBlank(usuario) && usuario.equals(normalize(log.getUsuario()))) {
+            return true;
+        }
+
+        Nodo node = politica != null && politica.getNodos() != null ? findNode(politica, log.getNodoId()) : null;
+        if (!isActivityNode(node)) {
+            return false;
+        }
+
+        String departamentoId = stringValue(payload.get("departamentoId"));
+        if (!isBlank(departamentoId) && departamentoId.equals(node.getDepartamentoId())) {
+            return true;
+        }
+
+        return getAssigneesForNode(politica, node).stream()
+                .map(this::normalize)
+                .anyMatch(assignee -> assignee.equals(usuario));
+    }
+
+    private List<String> getAssigneesForNode(PoliticaDeNegocio politica, Nodo node) {
+        if (node == null) {
+            return List.of();
+        }
+        if (node.getFuncionariosAsignados() != null && !node.getFuncionariosAsignados().isEmpty()) {
+            return node.getFuncionariosAsignados();
+        }
+        if (politica == null || politica.getDepartamentos() == null) {
+            return List.of();
+        }
+        return politica.getDepartamentos().stream()
+                .filter(departamento -> Objects.equals(node.getDepartamentoId(), stringValue(departamento.get("id"))))
+                .findFirst()
+                .map(departamento -> {
+                    Object asignados = departamento.get("funcionariosAsignados");
+                    if (asignados instanceof List<?> list) {
+                        return list.stream().map(String::valueOf).toList();
+                    }
+                    return List.<String>of();
+                })
+                .orElse(List.of());
+    }
+
+    private String normalize(String value) {
+        String normalized = Normalizer.normalize(String.valueOf(value == null ? "" : value), Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "");
+        return normalized.toLowerCase(Locale.ROOT).trim();
+    }
+
+    private String stringValue(Object value) {
+        return value != null ? String.valueOf(value) : null;
+    }
+
+    private String emptyToNull(String value) {
+        return value == null || value.isBlank() ? null : value;
     }
 
     private void appendAutomaticMovementLogs(
